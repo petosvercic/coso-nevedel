@@ -218,16 +218,18 @@ export default function Home() {
     const daysLine = applyTemplate(daysNote, { days: String(alive) });
     const nextLine = applyTemplate(nextBirthdayNote, { days: String(toNext) });
 
-    // blurred: vyber 4 riadky deterministicky
-    const blurred = Array.from({ length: 4 }, (_, i) => pick(blurredFacts, `${key}|blur|${i}`));
- = pick(notes.westernZodiac, `${key}|z`);
-    const chineseNote = pick(notes.chineseZodiac, `${key}|c`);
-    const daysNote = pick(notes.daysAlive, `${key}|d`);
-    const famousNote = pick(notes.famous, `${key}|f`);
-    const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
+   // blurred: vyber 4 riadky deterministicky
+const blurred = Array.from({ length: 4 }, (_, i) =>
+  pick(blurredFacts, `${key}|blur|${i}`)
+);
 
-    // blurred: vyber 4 riadky deterministicky
-    const blurred = Array.from({ length: 4 }, (_, i) => pick(blurredFacts, `${key}|blur|${i}`));
+const zodiacNote = pick(notes.westernZodiac, `${key}|z`);
+const chineseNote = pick(notes.chineseZodiac, `${key}|c`);
+const daysNote = pick(notes.daysAlive, `${key}|d`);
+const famousNote = pick(notes.famous, `${key}|f`);
+const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
+const bdayNote = pick(notes.birthdayCountdown, `${key}|bd`);
+
 
         return {
       key,
