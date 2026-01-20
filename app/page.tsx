@@ -249,7 +249,7 @@ export default function Home() {
 
             {/* Rozmazané riadky */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">A teraz to „zahmlené“:</h2>
+              <h2 className="font-semibold">Čo dalej určite nevieš:</h2>
               <div className="mt-3 space-y-2">
                 <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px]" />
                 <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px] w-11/12" />
