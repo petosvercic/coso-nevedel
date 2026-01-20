@@ -1,175 +1,84 @@
-// scripts/seedBirthdays.mjs
-import fs from "node:fs";
-import path from "node:path";
+import fs from "fs/promises";
 
-const OUT_PATH = path.join(process.cwd(), "app", "data", "famousBirthdays.json");
+const FILE = new URL("../app/data/famousBirthdays.json", import.meta.url);
+const OUT = new URL("../app/data/famousBirthdays.json", import.meta.url);
 
-// Wikimedia “On this day” feed (English). Nie je 100% garantované, že bude mať births pre každý deň.
-function makeUrl(mm, dd) {
-  // mm, dd sú "01".."12" a "01".."31"
-  return `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/births/${mm}/${dd}`;
+// Wikipedia REST summary endpoint
+async function wikiSummary(title, lang = "en") {
+  const url =
+    `https://${lang}.wikipedia.org/api/rest_v1/page/summary/` +
+    encodeURIComponent(title);
+  const r = await fetch(url, {
+    headers: { "user-agent": "coso-nevedel/1.0 (enricher)" },
+  });
+  if (!r.ok) return null;
+  return await r.json();
 }
 
 function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((res) => setTimeout(res, ms));
 }
 
-function pad2(n) {
-  return String(n).padStart(2, "0");
+function cleanExtract(text) {
+  if (!text) return null;
+  // zober prvú vetu alebo dve, bez zbytočných zátvoriek
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length > 220 ? t.slice(0, 220).replace(/\s+\S*$/, "") + "…" : t;
 }
 
-function loadExisting() {
-  try {
-    if (!fs.existsSync(OUT_PATH)) return {};
-    const raw = fs.readFileSync(OUT_PATH, "utf8");
-    if (!raw.trim()) return {};
-    return JSON.parse(raw);
-  } catch (e) {
-    console.log("WARN: Neviem načítať existujúci JSON, idem od nuly.", e?.message ?? e);
-    return {};
-  }
-}
+async function findBestSummary(name) {
+  // 1) skúsi en
+  const s1 = await wikiSummary(name, "en");
+  if (s1?.extract) return { lang: "en", extract: cleanExtract(s1.extract) };
 
-function save(obj) {
-  fs.mkdirSync(path.dirname(OUT_PATH), { recursive: true });
-  fs.writeFileSync(OUT_PATH, JSON.stringify(obj, null, 2), "utf8");
-}
+  // 2) fallback: sk (nie vždy existuje)
+  const s2 = await wikiSummary(name, "sk");
+  if (s2?.extract) return { lang: "sk", extract: cleanExtract(s2.extract) };
 
-function normalizeEntry(item) {
-  // Wikimedia feed zvyčajne dáva:
-  // { text, pages: [{ title, extract, ... }] }
-  // Nás zaujíma title + prípadne note (extract skrátený)
-  const title =
-    item?.pages?.[0]?.normalizedtitle ||
-    item?.pages?.[0]?.title ||
-    item?.text ||
-    null;
-
-  if (!title) return null;
-
-  const extract = item?.pages?.[0]?.extract || "";
-  const note = extract ? extract.slice(0, 120).trim() : undefined;
-
-  return note ? { name: title, note } : { name: title };
-}
-
-// robust fetch s timeoutom + retry
-async function safeFetchJSON(url, { timeoutMs = 15000, retries = 3 } = {}) {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
-
-    try {
-      const res = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          "accept": "application/json",
-          // slušnosť, aby nás nebanovali
-          "user-agent": "coso-nevedel/1.0 (seed script)",
-        },
-      });
-
-      clearTimeout(t);
-
-      if (!res.ok) {
-        // rate limit / server hiccup
-        const msg = `HTTP ${res.status}`;
-        if (attempt < retries) {
-          await sleep(500 * attempt);
-          continue;
-        }
-        throw new Error(msg);
-      }
-
-      return await res.json();
-    } catch (err) {
-      clearTimeout(t);
-      const isLast = attempt === retries;
-
-      // “terminated / socket closed / aborted” = klasika, len retry
-      if (!isLast) {
-        await sleep(700 * attempt);
-        continue;
-      }
-      return null;
-    }
-  }
   return null;
 }
 
-function daysInMonth(mm) {
-  const m = Number(mm);
-  if ([1, 3, 5, 7, 8, 10, 12].includes(m)) return 31;
-  if ([4, 6, 9, 11].includes(m)) return 30;
-  return 29; // február necháme 29, lebo feed má aj 02/29
-}
-
-function keyFor(mm, dd) {
-  return `${mm}-${dd}`;
-}
-
 async function main() {
-  const result = loadExisting();
+  const raw = await fs.readFile(FILE, "utf8");
+  const data = JSON.parse(raw);
 
-  console.log("Seedujem famous birthdays ->", OUT_PATH);
-  console.log("Už mám uložených dní:", Object.keys(result).length);
+  let total = 0;
+  let updated = 0;
 
-  for (let m = 1; m <= 12; m++) {
-    const mm = pad2(m);
-    const dim = daysInMonth(mm);
+  for (const [day, arr] of Object.entries(data)) {
+    for (let i = 0; i < arr.length; i++) {
+      const item = arr[i];
+      if (!item || typeof item !== "object") continue;
 
-    for (let d = 1; d <= dim; d++) {
-      const dd = pad2(d);
-      const key = keyFor(mm, dd);
+      total++;
 
-      // Ak už deň existuje a má aspoň 1 entry, preskoč
-      if (Array.isArray(result[key]) && result[key].length > 0) {
-        console.log(`SKIP ${key} -> already ${result[key].length} entries`);
-        continue;
-      }
+      // preskoč ak už má note
+      if (item.note && String(item.note).trim().length > 0) continue;
 
-      const url = makeUrl(mm, dd);
-      const data = await safeFetchJSON(url, { timeoutMs: 15000, retries: 4 });
+      const name = item.name;
+      console.log(`LOOKUP ${day} -> ${name}`);
 
-      if (!data) {
-        console.log(`RETRY-LATER ${key} -> fetch vrátil null (socket/timeout)`);
-        await sleep(250);
-        continue;
-      }
-
-      // Wikimedia feed by mal mať "births": []
-      const births = Array.isArray(data.births) ? data.births : null;
-
-      if (!births) {
-        console.log(`RETRY-LATER ${key} -> odpoveď nemá "births" (nezapisujem)`);
-        await sleep(250);
-        continue;
-      }
-
-      const entries = births
-        .map(normalizeEntry)
-        .filter(Boolean)
-        // max 6 (aby to bolo “crazy ale nie nekonečné”)
-        .slice(0, 6);
-
-      if (entries.length > 0) {
-        result[key] = entries;
-        save(result);
-        console.log(`OK ${key} -> ${entries.length} entries`);
+      const sum = await findBestSummary(name);
+      if (sum?.extract) {
+        item.note = sum.extract; // sem ide “kto to je”
+        updated++;
+        console.log(`  OK (${sum.lang})`);
       } else {
-        // nič nezapisuj, len preskoč (môže byť dočasný glitch alebo prázdny deň)
-        console.log(`SKIP ${key} -> 0 entries (nezapisujem, skúsim neskôr)`);
+        item.note = null;
+        console.log(`  MISS`);
       }
 
-      // malý delay = menej šanca, že dostaneš ban/rate limit
-      await sleep(250);
+      // šetríme API, aby nás nezarezali
+      await sleep(350);
     }
   }
 
-  console.log("Hotovo. Uložené dni:", Object.keys(result).length);
+  await fs.writeFile(OUT, JSON.stringify(data, null, 2), "utf8");
+
+  console.log(`Done. total persons: ${total}, updated: ${updated}`);
 }
 
 main().catch((e) => {
-  console.error("FATAL:", e);
+  console.error(e);
   process.exit(1);
 });
