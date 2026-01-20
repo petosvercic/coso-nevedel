@@ -1,78 +1,66 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { famousBirthdays } from "./data/famousBirthdays";
+import famousBirthdays from "./data/famousBirthdays.json";
+import { notes } from "./data/notes";
+import { blurredFacts } from "./data/blurredFacts";
 
-// --- helpers (držím to v jednom súbore, aby si nemusel nič hľadať) ---
+type FamousEntry = {
+  name: string;
+  year: number;
+  place: string | null;
+};
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function mmdd(date: Date) {
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
 
 function parseISODate(iso: string): Date | null {
-  // očakávame "YYYY-MM-DD" (z <input type="date">)
+  // input type="date" -> YYYY-MM-DD
   if (!iso) return null;
-  const [y, m, d] = iso.split("-").map((x) => Number(x));
-  if (!y || !m || !d) return null;
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  // validácia
-  if (
-    dt.getUTCFullYear() !== y ||
-    dt.getUTCMonth() !== m - 1 ||
-    dt.getUTCDate() !== d
-  ) {
-    return null;
-  }
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
   return dt;
 }
 
-function mmdd(date: Date): string {
-  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(date.getUTCDate()).padStart(2, "0");
-  return `${m}-${d}`;
+function daysAlive(birth: Date, now = new Date()) {
+  const ms = 24 * 60 * 60 * 1000;
+  const b = Date.UTC(birth.getFullYear(), birth.getMonth(), birth.getDate());
+  const n = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.max(0, Math.floor((n - b) / ms));
 }
 
-function dayOfYearUTC(date: Date): number {
-  const start = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const diff = date.getTime() - start.getTime();
-  return Math.floor(diff / 86400000) + 1;
-}
-
-function getAgeUTC(birth: Date, now = new Date()): number {
-  const y = birth.getUTCFullYear();
-  const m = birth.getUTCMonth();
-  const d = birth.getUTCDate();
-
-  const ny = now.getUTCFullYear();
-  const nm = now.getUTCMonth();
-  const nd = now.getUTCDate();
-
-  let age = ny - y;
-  if (nm < m || (nm === m && nd < d)) age -= 1;
+function getAge(birth: Date, now = new Date()) {
+  let age = now.getFullYear() - birth.getFullYear();
+  const m = now.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
   return age;
 }
 
-function daysAliveUTC(birth: Date, now = new Date()): number {
-  const b = Date.UTC(birth.getUTCFullYear(), birth.getUTCMonth(), birth.getUTCDate());
-  const n = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  return Math.max(0, Math.floor((n - b) / 86400000));
+function daysUntilNextBirthday(birth: Date, now = new Date()) {
+  const thisYear = new Date(now.getFullYear(), birth.getMonth(), birth.getDate());
+  const target = thisYear >= new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    ? thisYear
+    : new Date(now.getFullYear() + 1, birth.getMonth(), birth.getDate());
+
+  const ms = 24 * 60 * 60 * 1000;
+  const a = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const b = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
+  return Math.max(0, Math.floor((b - a) / ms));
 }
 
-function daysUntilNextBirthdayUTC(birth: Date, now = new Date()): number {
-  const ny = now.getUTCFullYear();
-  const bm = birth.getUTCMonth();
-  const bd = birth.getUTCDate();
-
-  let next = new Date(Date.UTC(ny, bm, bd));
-  const today = new Date(Date.UTC(ny, now.getUTCMonth(), now.getUTCDate()));
-
-  if (next.getTime() < today.getTime()) {
-    next = new Date(Date.UTC(ny + 1, bm, bd));
-  }
-
-  return Math.floor((next.getTime() - today.getTime()) / 86400000);
-}
-
-function westernZodiacUTC(date: Date): string {
-  // hranice sú klasické; používame UTC
-  const m = date.getUTCMonth() + 1;
-  const d = date.getUTCDate();
+function westernZodiac(date: Date) {
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
 
   if ((m === 1 && d >= 20) || (m === 2 && d <= 18)) return "Vodnár";
   if ((m === 2 && d >= 19) || (m === 3 && d <= 20)) return "Ryby";
@@ -88,8 +76,7 @@ function westernZodiacUTC(date: Date): string {
   return "Kozorožec";
 }
 
-function chineseZodiac(year: number): string {
-  // 12-ročný cyklus, referenčný rok 2008 = Potkan
+function chineseZodiac(year: number) {
   const animals = [
     "Potkan",
     "Byvol",
@@ -104,31 +91,34 @@ function chineseZodiac(year: number): string {
     "Pes",
     "Prasa",
   ];
+  // 2008 = Potkan (index 0)
   const idx = ((year - 2008) % 12 + 12) % 12;
   return animals[idx];
 }
 
-function nameStats(name: string) {
-  const trimmed = name.trim();
-  const noSpaces = trimmed.replace(/\s+/g, "");
-  const letters = noSpaces.length;
-  const vowels = (noSpaces.match(/[aeiouyáäéíóôöúýàèìòùâêîôû]/gi) || []).length;
-  const consonants = Math.max(0, letters - vowels);
-  return { trimmed, letters, vowels, consonants };
+function nameLetters(name: string) {
+  return name.trim().replace(/\s+/g, "").length;
 }
 
-function pickFamous(mmddKey: string): string | null {
-  const list = famousBirthdays[mmddKey];
-  if (!list || list.length === 0) return null;
-  // deterministicky „náhodné“: vezmeme index podľa súčtu číslic v kľúči
-  const seed = mmddKey
-    .replace("-", "")
-    .split("")
-    .reduce((a, c) => a + Number(c || 0), 0);
-  const idx = seed % list.length;
-  const entry = list[idx];
-  if (typeof entry === "string") return entry;
-  return entry.note ? `${entry.name} (${entry.note})` : entry.name;
+function hashString(s: string) {
+  // jednoduchý deterministický hash
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0);
+}
+
+function pick<T>(arr: readonly T[], seed: string) {
+  if (!arr.length) throw new Error("pick() empty array");
+  const idx = hashString(seed) % arr.length;
+  return arr[idx];
+}
+
+function formatFamous(e: FamousEntry) {
+  const place = e.place ? ` – ${e.place}` : "";
+  return `${e.name} (${e.year})${place}`;
 }
 
 export default function Home() {
@@ -137,38 +127,55 @@ export default function Home() {
   const [submitted, setSubmitted] = useState(false);
 
   const computed = useMemo(() => {
+    if (!submitted) return null;
+
+    const cleanName = name.trim();
     const birth = parseISODate(birthISO);
-    if (!birth) return null;
+    if (!cleanName || !birth) return { error: "Zadaj meno aj dátum (cez kalendárik)." as const };
 
-    const stats = nameStats(name);
-    const zodiac = westernZodiacUTC(birth);
-    const chinese = chineseZodiac(birth.getUTCFullYear());
-    const doy = dayOfYearUTC(birth);
-    const age = getAgeUTC(birth);
-    const alive = daysAliveUTC(birth);
-    const nextBday = daysUntilNextBirthdayUTC(birth);
     const key = mmdd(birth);
-    const famous = pickFamous(key);
+    const list = (famousBirthdays as Record<string, FamousEntry[]>)[key] ?? [];
+    const famous = list.length ? list[hashString(key) % list.length] : null;
 
-    // „crazy“ drobnosti, ale stále bezpečné a deterministické
-    const heartbeat = alive * 100000; // ~100k úderov denne (hrubý odhad)
-    const blinks = alive * 20000; // ~20k žmurknutí denne
+    const zodiac = westernZodiac(birth);
+    const cz = chineseZodiac(birth.getFullYear());
+    const alive = daysAlive(birth);
+    const age = getAge(birth);
+    const toNext = daysUntilNextBirthday(birth);
+    const letters = nameLetters(cleanName);
+
+    const zodiacNote = pick(notes.westernZodiac, `${key}|z`);
+    const chineseNote = pick(notes.chineseZodiac, `${key}|c`);
+    const daysNote = pick(notes.daysAlive, `${key}|d`);
+    const famousNote = pick(notes.famous, `${key}|f`);
+    const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
+
+    // blurred: vyber 4 riadky deterministicky
+    const blurred = Array.from({ length: 4 }, (_, i) => {
+      const item = pick(blurredFacts, `${key}|blur|${i}`);
+      return item;
+    });
 
     return {
-      birth,
       key,
-      stats,
+      cleanName,
+      birthISO,
       zodiac,
-      chinese,
-      doy,
-      age,
+      cz,
       alive,
-      nextBday,
-      famous,
-      heartbeat,
-      blinks,
+      age,
+      toNext,
+      letters,
+      famousText: famous ? formatFamous(famous) : null,
+
+      zodiacNote,
+      chineseNote,
+      daysNote,
+      famousNote,
+      blurredTitle,
+      blurred,
     };
-  }, [birthISO, name]);
+  }, [submitted, name, birthISO]);
 
   const canSubmit = name.trim().length > 0 && !!parseISODate(birthISO);
 
@@ -203,86 +210,94 @@ export default function Home() {
             </button>
 
             <p className="text-xs text-neutral-400">
-              Tlačidlo sa odomkne, keď zadáš meno aj dátum. Áno, aj weby majú hranice.
+              Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.
             </p>
           </div>
         )}
 
-        {submitted && computed && (
+        {submitted && computed && "error" in computed && (
+          <div className="mt-6 text-sm text-red-300">
+            {computed.error}
+            <div className="mt-3">
+              <button onClick={() => setSubmitted(false)} className="underline">
+                Späť
+              </button>
+            </div>
+          </div>
+        )}
+
+        {submitted && computed && !("error" in computed) && (
           <div className="mt-6 space-y-5">
-            {/* 1 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Asi o sebe už vieš:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
                   <span className="text-neutral-400">Znamenie:</span> {computed.zodiac}
                 </div>
+                <div className="text-neutral-400">{computed.zodiacNote.replace("{zodiac}", computed.zodiac)}</div>
                 <div>
-                  <span className="text-neutral-400">Dĺžka mena (bez medzier):</span> {computed.stats.letters} znakov
+                  <span className="text-neutral-400">Dĺžka mena (bez medzier):</span> {computed.letters} znakov
                 </div>
               </div>
             </section>
 
-            {/* 2 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale možno netušíš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
-                  <span className="text-neutral-400">Čínske znamenie (rok):</span> {computed.chinese}
+                  <span className="text-neutral-400">Čínske znamenie (rok):</span> {computed.cz}
                 </div>
+                <div className="text-neutral-400">{computed.chineseNote.replace("{cz}", computed.cz)}</div>
                 <div>
                   <span className="text-neutral-400">Koľko dní si na svete (cca):</span> {computed.alive} dní
                 </div>
+                <div className="text-neutral-400">{computed.daysNote.replace("{days}", String(computed.alive))}</div>
               </div>
             </section>
 
-            {/* 3 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale určite nevieš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
                   <span className="text-neutral-400">V ten deň sa narodili aj:</span>{" "}
-                  {computed.famous ?? "(zatIAľ nemám v databáze tvoj dátum, doplníme)"}
+                  {computed.famousText ?? "(divné. nemalo by sa stať, databáza je full)"}
+                </div>
+                <div className="text-neutral-400">
+                  {computed.famousNote.replace("{famous}", computed.famousText ?? "niekto")}
                 </div>
               </div>
             </section>
 
-            {/* Rozmazané riadky */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">Čo dalej určite nevieš:</h2>
+              <h2 className="font-semibold">{computed.blurredTitle}</h2>
+
               <div className="mt-3 space-y-2">
-                <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px]" />
-                <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px] w-11/12" />
-                <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px] w-10/12" />
-                <div className="h-3 rounded bg-neutral-800/60 blur-[1.5px] w-9/12" />
+                {computed.blurred.map((t, i) => (
+                  <div
+                    key={i}
+                    className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.6px] select-none text-neutral-200"
+                  >
+                    {t}
+                  </div>
+                ))}
               </div>
 
-              <div className="mt-4 text-xs text-neutral-400">
-                Malý teaser: podľa hrubého odhadu už tvoje srdce spravilo asi {computed.heartbeat.toLocaleString()} úderov
-                a oči žmurkli okolo {computed.blinks.toLocaleString()} krát. Máš sa čím chváliť na party.
+              <div className="mt-5 flex items-center justify-between text-sm text-neutral-300">
+                <div>
+                  <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
+                  <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
+                </div>
+                <button onClick={() => setSubmitted(false)} className="underline">
+                  Skúsiť znova
+                </button>
+              </div>
+
+              <div className="mt-4">
+                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">
+                  Pokračovať
+                </button>
               </div>
             </section>
-
-            <div className="flex items-center justify-between text-sm text-neutral-300">
-              <div>
-                <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
-                <span className="text-neutral-500">Do narodenín:</span> {computed.nextBday} dní
-              </div>
-              <button onClick={() => setSubmitted(false)} className="underline">
-                Skúsiť znova
-              </button>
-            </div>
-          </div>
-        )}
-
-        {submitted && !computed && (
-          <div className="mt-6 text-sm text-red-300">
-            Niečo je zle s dátumom. Skús ho zadať cez ten kalendárik (input type=date).
-            <div className="mt-3">
-              <button onClick={() => setSubmitted(false)} className="underline">
-                Späť
-              </button>
-            </div>
           </div>
         )}
       </div>
