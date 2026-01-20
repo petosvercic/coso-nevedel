@@ -1,15 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import famousBirthdays from "./data/famousBirthdays.json";
+import famousBirthdaysData from "./data/famousBirthdays.json";
 import { notes } from "./data/notes";
 import { blurredFacts } from "./data/blurredFacts";
 
 type FamousEntry = {
   name: string;
-  year: number;
+  year: number | null;
   place: string | null;
+  note?: string;
 };
+
+// JSON vie mať trošku iný tvar (null/extra polia). Tu to znormalizujeme typovo.
+const famousBirthdays = famousBirthdaysData as unknown as Record<string, FamousEntry[]>;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -47,13 +51,12 @@ function getAge(birth: Date, now = new Date()) {
 }
 
 function daysUntilNextBirthday(birth: Date, now = new Date()) {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const thisYear = new Date(now.getFullYear(), birth.getMonth(), birth.getDate());
-  const target = thisYear >= new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    ? thisYear
-    : new Date(now.getFullYear() + 1, birth.getMonth(), birth.getDate());
+  const target = thisYear >= today ? thisYear : new Date(now.getFullYear() + 1, birth.getMonth(), birth.getDate());
 
   const ms = 24 * 60 * 60 * 1000;
-  const a = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
   const b = Date.UTC(target.getFullYear(), target.getMonth(), target.getDate());
   return Math.max(0, Math.floor((b - a) / ms));
 }
@@ -107,7 +110,7 @@ function hashString(s: string) {
     h ^= s.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  return (h >>> 0);
+  return h >>> 0;
 }
 
 function pick<T>(arr: readonly T[], seed: string) {
@@ -118,7 +121,8 @@ function pick<T>(arr: readonly T[], seed: string) {
 
 function formatFamous(e: FamousEntry) {
   const place = e.place ? ` – ${e.place}` : "";
-  return `${e.name} (${e.year})${place}`;
+  const year = e.year ? ` (${e.year})` : "";
+  return `${e.name}${year}${place}`;
 }
 
 export default function Home() {
@@ -134,7 +138,7 @@ export default function Home() {
     if (!cleanName || !birth) return { error: "Zadaj meno aj dátum (cez kalendárik)." as const };
 
     const key = mmdd(birth);
-    const list = (famousBirthdays as Record<string, FamousEntry[]>)[key] ?? [];
+    const list = famousBirthdays[key] ?? [];
     const famous = list.length ? list[hashString(key) % list.length] : null;
 
     const zodiac = westernZodiac(birth);
@@ -151,10 +155,7 @@ export default function Home() {
     const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
 
     // blurred: vyber 4 riadky deterministicky
-    const blurred = Array.from({ length: 4 }, (_, i) => {
-      const item = pick(blurredFacts, `${key}|blur|${i}`);
-      return item;
-    });
+    const blurred = Array.from({ length: 4 }, (_, i) => pick(blurredFacts, `${key}|blur|${i}`));
 
     return {
       key,
@@ -167,7 +168,6 @@ export default function Home() {
       toNext,
       letters,
       famousText: famous ? formatFamous(famous) : null,
-
       zodiacNote,
       chineseNote,
       daysNote,
@@ -209,9 +209,7 @@ export default function Home() {
               Vyhodnotiť
             </button>
 
-            <p className="text-xs text-neutral-400">
-              Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.
-            </p>
+            <p className="text-xs text-neutral-400">Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.</p>
           </div>
         )}
 
@@ -259,8 +257,7 @@ export default function Home() {
               <h2 className="font-semibold">Ale určite nevieš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
-                  <span className="text-neutral-400">V ten deň sa narodili aj:</span>{" "}
-                  {computed.famousText ?? "(divné. nemalo by sa stať, databáza je full)"}
+                  <span className="text-neutral-400">V ten deň sa narodili aj:</span> {computed.famousText ?? "(žiadne dáta?)"}
                 </div>
                 <div className="text-neutral-400">
                   {computed.famousNote.replace("{famous}", computed.famousText ?? "niekto")}
@@ -269,7 +266,7 @@ export default function Home() {
             </section>
 
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">{computed.blurredTitle}</h2>
+              <h2 className="font-semibold">Čo ďalej určite nevieš:</h2>
 
               <div className="mt-3 space-y-2">
                 {computed.blurred.map((t, i) => (
@@ -284,8 +281,7 @@ export default function Home() {
 
               <div className="mt-5 flex items-center justify-between text-sm text-neutral-300">
                 <div>
-                  <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
-                  <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
+                  <span className="text-neutral-500">Vek:</span> {computed.age} rokov · <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
                 </div>
                 <button onClick={() => setSubmitted(false)} className="underline">
                   Skúsiť znova
@@ -293,9 +289,7 @@ export default function Home() {
               </div>
 
               <div className="mt-4">
-                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">
-                  Pokračovať
-                </button>
+                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">Pokračovať</button>
               </div>
             </section>
           </div>
