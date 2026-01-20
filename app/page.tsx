@@ -28,10 +28,12 @@ function parseISODate(iso: string): Date | null {
   if (!iso) return null;
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
+
   const y = Number(m[1]);
   const mo = Number(m[2]);
   const d = Number(m[3]);
   const dt = new Date(y, mo - 1, d);
+
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
   return dt;
 }
@@ -99,10 +101,6 @@ function chineseZodiac(year: number) {
   return animals[idx];
 }
 
-function nameLetters(name: string) {
-  return name.trim().replace(/\s+/g, "").length;
-}
-
 function hashString(s: string) {
   // jednoduchý deterministický hash
   let h = 2166136261;
@@ -123,6 +121,15 @@ function formatFamous(e: FamousEntry) {
   const place = e.place ? ` – ${e.place}` : "";
   const year = e.year ? ` (${e.year})` : "";
   return `${e.name}${year}${place}`;
+}
+
+function fmt(n: number) {
+  return new Intl.NumberFormat("sk-SK").format(n);
+}
+
+function stripPlaceholder(text: string, placeholder: string) {
+  // keď template obsahuje placeholder, nech ho nevypľuje 2x vedľa seba
+  return text.replaceAll(placeholder, "").replace(/^[-–:;,. \s]+/, "").trim();
 }
 
 export default function Home() {
@@ -146,13 +153,18 @@ export default function Home() {
     const alive = daysAlive(birth);
     const age = getAge(birth);
     const toNext = daysUntilNextBirthday(birth);
-    const letters = nameLetters(cleanName);
 
     const zodiacNote = pick(notes.westernZodiac, `${key}|z`);
     const chineseNote = pick(notes.chineseZodiac, `${key}|c`);
     const daysNote = pick(notes.daysAlive, `${key}|d`);
     const famousNote = pick(notes.famous, `${key}|f`);
     const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
+
+    // odhady (priemer, nie klinika)
+    const minutesAlive = alive * 24 * 60;
+    const heartbeats = Math.round(minutesAlive * 75);
+    const breaths = Math.round(minutesAlive * 16);
+    const blinks = Math.round(minutesAlive * 15);
 
     // blurred: vyber 4 riadky deterministicky
     const blurred = Array.from({ length: 4 }, (_, i) => pick(blurredFacts, `${key}|blur|${i}`));
@@ -166,14 +178,19 @@ export default function Home() {
       alive,
       age,
       toNext,
-      letters,
       famousText: famous ? formatFamous(famous) : null,
+      famousName: famous?.name ?? null,
+
       zodiacNote,
       chineseNote,
       daysNote,
       famousNote,
       blurredTitle,
       blurred,
+
+      heartbeats,
+      breaths,
+      blinks,
     };
   }, [submitted, name, birthISO]);
 
@@ -230,11 +247,14 @@ export default function Home() {
               <h2 className="font-semibold">Asi o sebe už vieš:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
-                  <span className="text-neutral-400">Znamenie:</span> {computed.zodiac}
+                  <span className="text-neutral-400">Znamenie:</span>{" "}
+                  <span className="font-semibold">{computed.zodiac}</span> –{" "}
+                  {stripPlaceholder(computed.zodiacNote, "{zodiac}") || "(to ti raz niekto vysvetlí)"}
                 </div>
-                <div className="text-neutral-400">{computed.zodiacNote.replace("{zodiac}", computed.zodiac)}</div>
+
                 <div>
-                  <span className="text-neutral-400">Dĺžka mena (bez medzier):</span> {computed.letters} znakov
+                  <span className="text-neutral-400">Do narodenín:</span> {computed.toNext} dní. Už len zistiť, kto ti spraví
+                  oslavu.
                 </div>
               </div>
             </section>
@@ -243,13 +263,16 @@ export default function Home() {
               <h2 className="font-semibold">Ale možno netušíš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
-                  <span className="text-neutral-400">Čínske znamenie (rok):</span> {computed.cz}
+                  <span className="text-neutral-400">Čínske znamenie (rok):</span>{" "}
+                  <span className="font-semibold">{computed.cz}</span> –{" "}
+                  {stripPlaceholder(computed.chineseNote, "{cz}") || "(symbolika zdarma k životu)"}
                 </div>
-                <div className="text-neutral-400">{computed.chineseNote.replace("{cz}", computed.cz)}</div>
+
                 <div>
                   <span className="text-neutral-400">Koľko dní si na svete (cca):</span> {computed.alive} dní
                 </div>
-                <div className="text-neutral-400">{computed.daysNote.replace("{days}", String(computed.alive))}</div>
+
+                <div className="text-neutral-400">{stripPlaceholder(computed.daysNote, "{days}") || "(matematika je neúprosná)"}</div>
               </div>
             </section>
 
@@ -257,10 +280,14 @@ export default function Home() {
               <h2 className="font-semibold">Ale určite nevieš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-1">
                 <div>
-                  <span className="text-neutral-400">V ten deň sa narodili aj:</span> {computed.famousText ?? "(žiadne dáta?)"}
+                  <span className="text-neutral-400">Dnes má narodeniny aj:</span>{" "}
+                  {computed.famousText ?? "(žiadne dáta?)"}
                 </div>
+
                 <div className="text-neutral-400">
-                  {computed.famousNote.replace("{famous}", computed.famousText ?? "niekto")}
+                  {computed.famousName
+                    ? computed.famousNote.replace("{famous}", computed.famousName)
+                    : computed.famousNote.replace("{famous}", "niekto")}
                 </div>
               </div>
             </section>
@@ -270,10 +297,7 @@ export default function Home() {
 
               <div className="mt-3 space-y-2">
                 {computed.blurred.map((t, i) => (
-                  <div
-                    key={i}
-                    className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.6px] select-none text-neutral-200"
-                  >
+                  <div key={i} className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.6px] select-none text-neutral-200">
                     {t}
                   </div>
                 ))}
@@ -281,14 +305,22 @@ export default function Home() {
 
               <div className="mt-5 flex items-center justify-between text-sm text-neutral-300">
                 <div>
-                  <span className="text-neutral-500">Vek:</span> {computed.age} rokov · <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
+                  <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
+                  <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
                 </div>
                 <button onClick={() => setSubmitted(false)} className="underline">
                   Skúsiť znova
                 </button>
               </div>
 
-              <div className="mt-4">
+              <div className="mt-4 space-y-2 text-sm text-neutral-300">
+                <div className="text-neutral-400">
+                  Odhad životnej štatistiky:{" "}
+                  <span className="text-neutral-200">{fmt(computed.heartbeats)}</span> úderov srdca ·{" "}
+                  <span className="text-neutral-200">{fmt(computed.breaths)}</span> nádychov ·{" "}
+                  <span className="text-neutral-200">{fmt(computed.blinks)}</span> žmurknutí
+                </div>
+
                 <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">Pokračovať</button>
               </div>
             </section>
