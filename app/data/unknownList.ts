@@ -1,13 +1,30 @@
-// app/data/unknownList.ts
-export type UnknownItem = {
-  title: string;       // viditeľné
-  blurredHint: string; // rozmazané (použije {n})
-};
-
-export const unknownItems: UnknownItem[] = [
-  { title: "Koľkokrát si sa pravdepodobne nadýchol", blurredHint: "≈ {n}× · a väčšina z nich bola úplne automatická" },
-  { title: "Koľko rozhodnutí si urobil bez toho, aby si si to uvedomil", blurredHint: "≈ {n} · vedomých bolo len smiešne málo" },
-  { title: "Koľko krát ti udrelo srdce", blurredHint: "≈ {n}× · a stále sa tváriš, že máš čas" },
-  { title: "Koľkokrát si žmurkol", blurredHint: "≈ {n}× · polovicu z toho v rozpakoch" },
-  { title: "Koľko ľudí si nepriamo ovplyvnil", blurredHint: "≈ {n} · viac než si ochotný priznať" },
-];
+export const unknownItems = [
+  {
+    title: "Koľko ľudí si ovplyvnil bez toho, aby si si to uvedomil.",
+    blurredHint: "Približne {n} ľudí.",
+  },
+  {
+    title: "Koľkokrát si niekomu zmenil deň. Aj neúmyselne.",
+    blurredHint: "Stalo sa to viac ráz, než by si tipoval.",
+  },
+  {
+    title: "Koľko rozhodnutí si urobil len preto, aby bol pokoj.",
+    blurredHint: "Približne {n} rozhodnutí.",
+  },
+  {
+    title: "Koľko energie si minul na udržiavanie vzťahov, ktoré už dávno nefungovali.",
+    blurredHint: "Viac, než by si dnes chcel priznať.",
+  },
+  {
+    title: "Koľkokrát si vedel, že by si sa mal rozhodnúť inak.",
+    blurredHint: "Toto číslo nie je malé.",
+  },
+  {
+    title: "Koľko vecí si nechal tak, lebo sa ti nechcelo ich riešiť.",
+    blurredHint: "Dosť na to, aby sa z toho stal zvyk.",
+  },
+  {
+    title: "Koľko ľudí ťa pozná len povrchne. A koľko si si k tomu sám dopomohol.",
+    blurredHint: "Viac, než by si povedal nahlas.",
+  },
+] as const;
