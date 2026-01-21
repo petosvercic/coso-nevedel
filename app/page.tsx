@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import famousBirthdaysRaw from "./data/famousBirthdays.json";
 import { analogies } from "./data/analogies";
 import { unknownItems } from "./data/unknownList";
+import { notes } from "./data/notes";
 
 type FamousEntry = {
   name: string;
@@ -106,7 +107,6 @@ function formatNumber(n: number) {
 }
 
 function zodiacVibe(z: string) {
-  // krátke “vodnar - vodcovsky typ” veci
   const map: Record<string, string[]> = {
     Vodnár: ["Vodnár = hlava v oblakoch, nohy v realite. Občas naopak.", "Vodnár: originál, ktorý sa tvári, že mu na tom nezáleží."],
     Ryby: ["Ryby: empatia na plné pecky. Aj keď sa tváriš, že nie.", "Ryby: vieš vycítiť náladu miestnosti skôr, než si sadneš."],
@@ -143,43 +143,46 @@ function analogyLine(days: number, seed: string) {
 }
 
 function formatFamous(e: FamousEntry) {
+  // Zámerne minimalizované: nech to neznie ako Wikipedia (a najmä nie po anglicky).
   const year = typeof e.year === "number" ? ` (${e.year})` : "";
-  const place = e.place ? ` – ${e.place}` : "";
-  const extra = e.what ? ` · ${e.what}` : e.note ? ` · ${e.note}` : "";
-  return `${e.name}${year}${place}${extra}`;
+  return `${e.name}${year}`;
 }
-
 
 function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
 function calcUnknownNumbers(days: number, age: number, seed: string) {
-  // nie “vedecké”, ale “pravdivé na pocit”
   const seedN = hashString(seed);
 
-  // dýchanie: ~12-18 / min
   const breathsPerMin = 12 + (seedN % 7); // 12..18
   const breaths = days * 24 * 60 * breathsPerMin;
 
-  // srdce: ~60-95 / min
   const bpm = 60 + ((seedN >>> 3) % 36); // 60..95
   const heart = days * 24 * 60 * bpm;
 
-  // žmurkanie: ~10-20 / min keď si hore, ~16h/deň
   const blinksPerMin = 10 + ((seedN >>> 6) % 11); // 10..20
   const blinks = days * 16 * 60 * blinksPerMin;
 
-  // “rozhodnutia”: hrubý pocit, nie fakt (200..2500 denne)
   const decisionsPerDay = 200 + ((seedN >>> 9) % 2301);
   const decisions = days * decisionsPerDay;
 
-  // “ovplyvnení ľudia”: mierka (desiatky až tisíce) podľa veku
   const base = 30 + age * 25;
   const jitter = (seedN >>> 12) % 400;
   const influenced = clamp(base + jitter, 30, 2500);
 
   return { breaths, heart, blinks, decisions, influenced };
+}
+
+function chineseZodiacLine(cz: string, seed: string) {
+  const dict = (notes as any).chineseZodiacByAnimal as Record<string, readonly string[]> | undefined;
+  const list = dict?.[cz];
+  const line = list?.length ? pick(list, `${seed}|cz|${cz}`) : pick(notes.chineseZodiac, `${seed}|cz|fallback`).replace("{cz}", cz);
+  return line.replace("{cz}", cz);
+}
+
+function curiosityLine(seed: string) {
+  return pick(notes.famous, `${seed}|curiosity`);
 }
 
 export default function Home() {
@@ -209,25 +212,47 @@ export default function Home() {
     const list = famousBirthdays[key] ?? [];
     const famous = list.length ? list[hashString(`${key}|${cleanName}`) % list.length] : null;
 
+    const czLine = chineseZodiacLine(cz, `${key}|cz|${cleanName}`);
+    const curLine = curiosityLine(`${key}|cur|${cleanName}`);
+
     // “čo ďalej určite nevieš”:
-    // titles viditeľne, čísla + pointy rozmazane.
+    // 3 telesné veci viditeľne, zvyšok rozmazane.
     const nums = calcUnknownNumbers(alive, age, `${key}|unknown|${cleanName}`);
 
-    const unknown = unknownItems.map((it) => {
-      let nStr = "???";
-      const lowTitle = it.title.toLowerCase();
+    const vitals = [
+      {
+        title: "Počet úderov srdca",
+        value: `Približne ${formatNumber(nums.heart)} úderov srdca.`,
+        note: "Väčšina z nich bez toho, aby si si to uvedomil.",
+      },
+      {
+        title: "Počet nádychov",
+        value: `Asi ${formatNumber(nums.breaths)} nádychov.`,
+        note: "Každý z nich ťa držal o chvíľu dlhšie tu.",
+      },
+      {
+        title: "Počet žmurknutí",
+        value: `Cca ${formatNumber(nums.blinks)} žmurknutí.`,
+        note: "Medzi nimi sa odohral celý tvoj svet.",
+      },
+    ] as const;
 
-      if (lowTitle.includes("nadýchol")) nStr = formatNumber(nums.breaths);
-      else if (lowTitle.includes("srdce")) nStr = formatNumber(nums.heart);
-      else if (lowTitle.includes("žmur")) nStr = formatNumber(nums.blinks);
-      else if (lowTitle.includes("rozhod")) nStr = formatNumber(nums.decisions);
-      else if (lowTitle.includes("ovplyv")) nStr = formatNumber(nums.influenced);
+    const blurredUnknown = unknownItems
+      .filter((it) => {
+        const t = it.title.toLowerCase();
+        return !(t.includes("nadýchol") || t.includes("srdce") || t.includes("žmur"));
+      })
+      .map((it) => {
+        let nStr = "???";
+        const lowTitle = it.title.toLowerCase();
+        if (lowTitle.includes("rozhod")) nStr = formatNumber(nums.decisions);
+        else if (lowTitle.includes("ovplyv")) nStr = formatNumber(nums.influenced);
 
-      return {
-        title: it.title,
-        blurredHint: it.blurredHint.replace("{n}", nStr),
-      };
-    });
+        return {
+          title: it.title,
+          blurredHint: it.blurredHint.replace("{n}", nStr),
+        };
+      });
 
     return {
       cleanName,
@@ -241,8 +266,11 @@ export default function Home() {
       vibe,
       bdayLine,
       aliveLine,
-      famousText: famous ? formatFamous(famous) : null,
-      unknown,
+      czLine,
+      famousName: famous ? formatFamous(famous) : null,
+      curLine,
+      vitals,
+      blurredUnknown,
     };
   }, [submitted, name, birthISO]);
 
@@ -278,9 +306,7 @@ export default function Home() {
               Vyhodnotiť
             </button>
 
-            <p className="text-xs text-neutral-400">
-              Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.
-            </p>
+            <p className="text-xs text-neutral-400">Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.</p>
           </div>
         )}
 
@@ -315,6 +341,7 @@ export default function Home() {
                 <div>
                   Čínske znamenie (rok): <span className="text-neutral-300">{computed.cz}</span>
                 </div>
+                <div className="text-neutral-300">{computed.czLine}</div>
                 <div>
                   Na svete si približne <span className="text-neutral-300">{computed.alive}</span> dní.
                 </div>
@@ -327,15 +354,10 @@ export default function Home() {
               <h2 className="font-semibold">Ale určite nevieš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-2">
                 <div>
-                  V ten deň sa narodili aj:{" "}
-                  <span className="text-neutral-300">
-                    {computed.famousText ?? "(zatiaľ nič extra, ale databáza je tam)"}
-                  </span>
+                  Kuriozita dňa:{" "}
+                  <span className="text-neutral-300">{computed.famousName ?? "(zatiaľ nič extra, ale databáza sa tvári, že rastie)"}</span>
                 </div>
-                {/* žiadne duplicitné “vodnár vodnár” a žiadne cringe */}
-                <div className="text-neutral-400">
-                  Toto je len návnada. Skutočný jackpot je o pár riadkov nižšie.
-                </div>
+                <div className="text-neutral-400">{computed.curLine}</div>
               </div>
             </section>
 
@@ -343,25 +365,41 @@ export default function Home() {
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Čo ďalej určite nevieš:</h2>
 
-              {/* Viditeľné bullet body */}
-              <ul className="mt-3 list-disc list-inside text-sm text-neutral-200 space-y-1">
-                {computed.unknown.map((u, i) => (
-                  <li key={i}>{u.title}</li>
-                ))}
-              </ul>
-
-              {/* Rozmazané čísla + pointy */}
-              <div className="mt-4 space-y-2">
-                {computed.unknown.map((u, i) => (
-                  <div
-                    key={i}
-                    className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
-                    title="odblokuje sa po zaplatení"
-                  >
-                    {u.blurredHint}
+              {/* Viditeľné: tri telesné čísla + jemná poznámka */}
+              <div className="mt-3 space-y-2 text-sm text-neutral-200">
+                {computed.vitals.map((v, i) => (
+                  <div key={i} className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2">
+                    <div className="text-neutral-400">{v.title}</div>
+                    <div className="text-neutral-100">{v.value}</div>
+                    <div className="text-neutral-400">{v.note}</div>
                   </div>
                 ))}
+
+                <div className="text-neutral-300 italic">Telo má presnejšiu pamäť než hlava.</div>
               </div>
+
+              {/* Rozmazané: zvyšok (sociálne/existenčné) */}
+              {computed.blurredUnknown.length > 0 && (
+                <>
+                  <ul className="mt-4 list-disc list-inside text-sm text-neutral-200 space-y-1">
+                    {computed.blurredUnknown.map((u, i) => (
+                      <li key={i}>{u.title}</li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-4 space-y-2">
+                    {computed.blurredUnknown.map((u, i) => (
+                      <div
+                        key={i}
+                        className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
+                        title="odblokuje sa po zaplatení"
+                      >
+                        {u.blurredHint}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
 
               <div className="mt-5 flex items-center justify-between text-sm text-neutral-300">
                 <div>
@@ -374,9 +412,7 @@ export default function Home() {
               </div>
 
               <div className="mt-4">
-                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">
-                  Pokračovať
-                </button>
+                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">Pokračovať</button>
               </div>
             </section>
           </div>
