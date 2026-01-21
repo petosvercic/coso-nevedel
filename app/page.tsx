@@ -1,18 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import famousBirthdaysData from "./data/famousBirthdays.json";
-import { notes } from "./data/notes";
-import { blurredFacts } from "./data/blurredFacts";
+
+import famousBirthdaysRaw from "./data/famousBirthdays.json";
+import { analogies } from "./data/analogies";
+import { unknownItems } from "./data/unknownList";
 
 type FamousEntry = {
   name: string;
-  year: number | null;
-  place: string | null;
+  year?: number;
+  place?: string | null;
   note?: string;
+  what?: string | null;
 };
 
-const famousBirthdays = famousBirthdaysData as unknown as Record<string, FamousEntry[]>;
+const famousBirthdays = famousBirthdaysRaw as unknown as Record<string, FamousEntry[]>;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -26,12 +28,10 @@ function parseISODate(iso: string): Date | null {
   if (!iso) return null;
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
-
   const y = Number(m[1]);
   const mo = Number(m[2]);
   const d = Number(m[3]);
   const dt = new Date(y, mo - 1, d);
-
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
   return dt;
 }
@@ -80,20 +80,8 @@ function westernZodiac(date: Date) {
 }
 
 function chineseZodiac(year: number) {
-  const animals = [
-    "Potkan",
-    "Byvol",
-    "Tiger",
-    "Zajac",
-    "Drak",
-    "Had",
-    "Kôň",
-    "Koza",
-    "Opica",
-    "Kohút",
-    "Pes",
-    "Prasa",
-  ];
+  const animals = ["Potkan", "Byvol", "Tiger", "Zajac", "Drak", "Had", "Kôň", "Koza", "Opica", "Kohút", "Pes", "Prasa"];
+  // 2008 = Potkan
   const idx = ((year - 2008) % 12 + 12) % 12;
   return animals[idx];
 }
@@ -108,38 +96,90 @@ function hashString(s: string) {
 }
 
 function pick<T>(arr: readonly T[], seed: string) {
-  if (!arr.length) throw new Error("pick() empty array");
   const idx = hashString(seed) % arr.length;
   return arr[idx];
 }
 
-function applyTemplate(tpl: string, vars: Record<string, string>) {
-  let out = tpl;
-  for (const [k, v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, v);
-  return out;
+function formatNumber(n: number) {
+  // 1234567 -> "1 234 567"
+  return Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
 
-function stripPlaceholder(text: string, placeholder: string) {
-  return text.replaceAll(placeholder, "").replace(/^[-–:;,. \s]+/, "").trim();
+function zodiacVibe(z: string) {
+  // krátke “vodnar - vodcovsky typ” veci
+  const map: Record<string, string[]> = {
+    Vodnár: ["Vodnár = hlava v oblakoch, nohy v realite. Občas naopak.", "Vodnár: originál, ktorý sa tvári, že mu na tom nezáleží."],
+    Ryby: ["Ryby: empatia na plné pecky. Aj keď sa tváriš, že nie.", "Ryby: vieš vycítiť náladu miestnosti skôr, než si sadneš."],
+    Baran: ["Baran: keď chceš, ideš. Keď nechceš, aj tak ideš.", "Baran: impulz je tvoja obľúbená forma plánovania."],
+    Býk: ["Býk: trpezlivosť… až kým nie.", "Býk: stabilita, pohodlie, a potom tvrdohlavosť ako bonus."],
+    Blíženci: ["Blíženci: dve myšlienky naraz, minimum nudy.", "Blíženci: komunikácia je šport. Niekedy kontaktný."],
+    Rak: ["Rak: lojalita je tvoja superschopnosť.", "Rak: pamätáš si veci, ktoré iní už dávno vytesnili."],
+    Lev: ["Lev: charisma, ktoré sa tvári nenápadne. Neúspešne.", "Lev: keď svietiš, miestnosť si to všimne."],
+    Panna: ["Panna: detail je náboženstvo.", "Panna: poriadok v chaosu… alebo aspoň pokus."],
+    Váhy: ["Váhy: hľadáš rovnováhu, aj keď si ju musíš vymyslieť.", "Váhy: diplomacia. A občas tiché súdy v hlave."],
+    Škorpión: ["Škorpión: intuícia, ktorá občas desí aj teba.", "Škorpión: ideš do hĺbky, aj keď je tam tma."],
+    Strelec: ["Strelec: sloboda je tvoj default.", "Strelec: zvedavosť ťa dostane ďaleko. Aj do problémov."],
+    Kozorožec: ["Kozorožec: disciplína, čo vyzerá ako chlad.", "Kozorožec: cieľ je cieľ. Aj keď to trvá."],
+  };
+  const list = map[z] ?? ["Znamenie je len štítok. Ty si komplikovanejší."];
+  return pick(list, `z|${z}`);
+}
+
+function birthdayCountdownLine(toNext: number, seed: string) {
+  const variants = [
+    `{n} dní do narodenín. Už len zistiť, kto to s tebou pôjde osláviť.`,
+    `{n} dní do narodenín. Čas beží. Ty sa tváriš, že nie.`,
+    `{n} dní do narodenín. Zvláštne, ako rýchlo sa z “raz” stane “už zase”.`,
+    `{n} dní do narodenín. Možno tento rok naozaj niečo spravíš… možno.`,
+    `{n} dní do narodenín. Ešte dosť času na plán. Aj na výhovorky.`,
+  ];
+  const t = pick(variants, seed);
+  return t.replace("{n}", String(toNext));
+}
+
+function analogyLine(days: number, seed: string) {
+  const a = pick(analogies, seed);
+  return a.text.replace("{days}", String(days));
 }
 
 function formatFamous(e: FamousEntry) {
-  const year = e.year ? ` (${e.year})` : "";
+  const year = typeof e.year === "number" ? ` (${e.year})` : "";
   const place = e.place ? ` – ${e.place}` : "";
-  const role = e.note ? `, ${e.note}` : "";
-  return `${e.name}${role}${year}${place}`;
+  const extra = e.what ? ` · ${e.what}` : e.note ? ` · ${e.note}` : "";
+  return `${e.name}${year}${place}${extra}`;
 }
 
-function fmtInt(n: number) {
-  return new Intl.NumberFormat("sk-SK").format(Math.round(n));
+
+function clamp(n: number, lo: number, hi: number) {
+  return Math.max(lo, Math.min(hi, n));
 }
 
-function approxLifeStats(days: number) {
-  // hrubé priemery, nie kardiológia
-  const heartbeats = days * 100_000; // ~100k/deň
-  const breaths = days * 20_000; // ~20k/deň
-  const blinks = days * 15_000; // ~15k/deň
-  return { heartbeats, breaths, blinks };
+function calcUnknownNumbers(days: number, age: number, seed: string) {
+  // nie “vedecké”, ale “pravdivé na pocit”
+  const seedN = hashString(seed);
+
+  // dýchanie: ~12-18 / min
+  const breathsPerMin = 12 + (seedN % 7); // 12..18
+  const breaths = days * 24 * 60 * breathsPerMin;
+
+  // srdce: ~60-95 / min
+  const bpm = 60 + ((seedN >>> 3) % 36); // 60..95
+  const heart = days * 24 * 60 * bpm;
+
+  // žmurkanie: ~10-20 / min keď si hore, ~16h/deň
+  const blinksPerMin = 10 + ((seedN >>> 6) % 11); // 10..20
+  const blinks = days * 16 * 60 * blinksPerMin;
+
+  // “rozhodnutia”: hrubý pocit, nie fakt (200..2500 denne)
+  const decisionsPerDay = 200 + ((seedN >>> 9) % 2301);
+  const decisions = days * decisionsPerDay;
+
+  // “ovplyvnení ľudia”: mierka (desiatky až tisíce) podľa veku
+  const base = 30 + age * 25;
+  const jitter = (seedN >>> 12) % 400;
+  const influenced = clamp(base + jitter, 30, 2500);
+
+  return { breaths, heart, blinks, decisions, influenced };
 }
 
 export default function Home() {
@@ -155,71 +195,54 @@ export default function Home() {
     if (!cleanName || !birth) return { error: "Zadaj meno aj dátum (cez kalendárik)." as const };
 
     const key = mmdd(birth);
-
     const zodiac = westernZodiac(birth);
     const cz = chineseZodiac(birth.getFullYear());
+
     const alive = daysAlive(birth);
     const age = getAge(birth);
     const toNext = daysUntilNextBirthday(birth);
 
+    const vibe = zodiacVibe(zodiac);
+    const bdayLine = birthdayCountdownLine(toNext, `${key}|bd|${cleanName}`);
+    const aliveLine = analogyLine(alive, `${key}|alive|${cleanName}`);
+
     const list = famousBirthdays[key] ?? [];
-    const famous = list.length ? list[hashString(key) % list.length] : null;
+    const famous = list.length ? list[hashString(`${key}|${cleanName}`) % list.length] : null;
 
-    // poznámky (deterministické)
-    const zodiacTpl = pick(notes.westernZodiac, `${key}|z`);
-    const chineseTpl = pick(notes.chineseZodiac, `${key}|c`);
-    const daysTpl = pick(notes.daysAlive, `${key}|d`);
-    const famousTpl = pick(notes.famous, `${key}|f`);
-    const blurredTitle = pick(notes.blurredIntro, `${key}|b`);
+    // “čo ďalej určite nevieš”:
+    // titles viditeľne, čísla + pointy rozmazane.
+    const nums = calcUnknownNumbers(alive, age, `${key}|unknown|${cleanName}`);
 
-    // “do narodenín” variabilne (fallback pool, nič nemusíš pridávať do notes.ts)
-    const nextBirthdayPool: string[] = [
-      "Do narodenín: {days} dní. Už len zistiť, kto ti spraví oslavu.",
-      "{days} dní do narodenín. Presne {days} príležitostí to odkladať.",
-      "Do narodenín ostáva {days} dní. Niekto to musí oznámiť tvojim ľuďom.",
-      "{days} dní do narodenín. Priprav sa na falošné nadšenie a tortu z benzínky.",
-      "{days} dní do narodenín. Ešte je čas predstierať, že ti na tom nezáleží.",
-    ];
-    const nextBirthdayTpl = pick(nextBirthdayPool, `${key}|nb`);
+    const unknown = unknownItems.map((it) => {
+      let nStr = "???";
+      const lowTitle = it.title.toLowerCase();
 
-    const zodiacLine = stripPlaceholder(applyTemplate(zodiacTpl, { zodiac }), zodiac);
-    const chineseLine = stripPlaceholder(applyTemplate(chineseTpl, { cz }), cz);
-    const daysLine = stripPlaceholder(applyTemplate(daysTpl, { days: String(alive) }), String(alive));
-    const nextLine = applyTemplate(nextBirthdayTpl, { days: String(toNext) });
+      if (lowTitle.includes("nadýchol")) nStr = formatNumber(nums.breaths);
+      else if (lowTitle.includes("srdce")) nStr = formatNumber(nums.heart);
+      else if (lowTitle.includes("žmur")) nStr = formatNumber(nums.blinks);
+      else if (lowTitle.includes("rozhod")) nStr = formatNumber(nums.decisions);
+      else if (lowTitle.includes("ovplyv")) nStr = formatNumber(nums.influenced);
 
-    const famousText = famous ? formatFamous(famous) : null;
-    const famousName = famous?.name ?? "niekto";
-
-    // tu chceme skôr “kto to je” ako len meno: rola/rok/miesto keď existuje
-    const famousLine = famousText ?? "(žiadne dáta?)";
-    const famousJoke = applyTemplate(famousTpl, { famous: famousName });
-
-    const blurred = Array.from({ length: 4 }, (_, i) => pick(blurredFacts, `${key}|blur|${i}`));
-
-    const life = approxLifeStats(alive);
+      return {
+        title: it.title,
+        blurredHint: it.blurredHint.replace("{n}", nStr),
+      };
+    });
 
     return {
-      key,
       cleanName,
       birthISO,
+      key,
       zodiac,
       cz,
       alive,
       age,
       toNext,
-
-      zodiacLine,
-      chineseLine,
-      daysLine,
-      nextLine,
-
-      famousLine,
-      famousJoke,
-
-      blurredTitle,
-      blurred,
-
-      life,
+      vibe,
+      bdayLine,
+      aliveLine,
+      famousText: famous ? formatFamous(famous) : null,
+      unknown,
     };
   }, [submitted, name, birthISO]);
 
@@ -255,7 +278,9 @@ export default function Home() {
               Vyhodnotiť
             </button>
 
-            <p className="text-xs text-neutral-400">Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.</p>
+            <p className="text-xs text-neutral-400">
+              Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.
+            </p>
           </div>
         )}
 
@@ -272,49 +297,68 @@ export default function Home() {
 
         {submitted && computed && !("error" in computed) && (
           <div className="mt-6 space-y-5">
+            {/* 1 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Asi o sebe už vieš:</h2>
-              <div className="mt-2 text-sm text-neutral-200 space-y-1">
+              <div className="mt-2 text-sm text-neutral-200 space-y-2">
                 <div>
-                  <span className="text-neutral-400">Znamenie:</span> <span className="font-semibold">{computed.zodiac}</span>{" "}
-                  <span className="text-neutral-400">–</span> {computed.zodiacLine}
+                  <span className="text-neutral-400">{computed.zodiac}</span> · {computed.vibe}
                 </div>
-                <div className="text-neutral-400">{computed.nextLine}</div>
+                <div className="text-neutral-300">{computed.bdayLine}</div>
               </div>
             </section>
 
+            {/* 2 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale možno netušíš že:</h2>
-              <div className="mt-2 text-sm text-neutral-200 space-y-1">
+              <div className="mt-2 text-sm text-neutral-200 space-y-2">
                 <div>
-                  <span className="text-neutral-400">Čínske znamenie (rok):</span>{" "}
-                  <span className="font-semibold">{computed.cz}</span> <span className="text-neutral-400">–</span>{" "}
-                  {computed.chineseLine}
+                  Čínske znamenie (rok): <span className="text-neutral-300">{computed.cz}</span>
                 </div>
                 <div>
-                  <span className="text-neutral-400">Koľko dní si na svete (cca):</span> {computed.alive} dní
+                  Na svete si približne <span className="text-neutral-300">{computed.alive}</span> dní.
                 </div>
-                <div className="text-neutral-400">{computed.daysLine}</div>
+                <div className="text-neutral-300">{computed.aliveLine}</div>
               </div>
             </section>
 
+            {/* 3 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale určite nevieš že:</h2>
-              <div className="mt-2 text-sm text-neutral-200 space-y-1">
+              <div className="mt-2 text-sm text-neutral-200 space-y-2">
                 <div>
-                  <span className="text-neutral-400">Dnes má narodeniny aj:</span> {computed.famousLine}
+                  V ten deň sa narodili aj:{" "}
+                  <span className="text-neutral-300">
+                    {computed.famousText ?? "(zatiaľ nič extra, ale databáza je tam)"}
+                  </span>
                 </div>
-                <div className="text-neutral-400">{computed.famousJoke}</div>
+                {/* žiadne duplicitné “vodnár vodnár” a žiadne cringe */}
+                <div className="text-neutral-400">
+                  Toto je len návnada. Skutočný jackpot je o pár riadkov nižšie.
+                </div>
               </div>
             </section>
 
+            {/* 4 */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Čo ďalej určite nevieš:</h2>
 
-              <div className="mt-3 space-y-2">
-                {computed.blurred.map((t, i) => (
-                  <div key={i} className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.6px] select-none text-neutral-200">
-                    {t}
+              {/* Viditeľné bullet body */}
+              <ul className="mt-3 list-disc list-inside text-sm text-neutral-200 space-y-1">
+                {computed.unknown.map((u, i) => (
+                  <li key={i}>{u.title}</li>
+                ))}
+              </ul>
+
+              {/* Rozmazané čísla + pointy */}
+              <div className="mt-4 space-y-2">
+                {computed.unknown.map((u, i) => (
+                  <div
+                    key={i}
+                    className="rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
+                    title="odblokuje sa po zaplatení"
+                  >
+                    {u.blurredHint}
                   </div>
                 ))}
               </div>
@@ -329,15 +373,10 @@ export default function Home() {
                 </button>
               </div>
 
-              <div className="mt-4 space-y-2 text-sm text-neutral-300">
-                <div className="text-neutral-400">
-                  Odhad životnej štatistiky:{" "}
-                  <span className="text-neutral-200">{fmtInt(computed.life.heartbeats)}</span> úderov srdca ·{" "}
-                  <span className="text-neutral-200">{fmtInt(computed.life.breaths)}</span> nádychov ·{" "}
-                  <span className="text-neutral-200">{fmtInt(computed.life.blinks)}</span> žmurknutí
-                </div>
-
-                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">Pokračovať</button>
+              <div className="mt-4">
+                <button className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold">
+                  Pokračovať
+                </button>
               </div>
             </section>
           </div>
