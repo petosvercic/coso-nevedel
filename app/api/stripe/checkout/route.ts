@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { stripe } from "@/app/lib/stripe";
+import { getStripe } from "@/app/lib/stripe";
 
 export const runtime = "nodejs";
 
@@ -17,6 +17,7 @@ export async function POST(req: Request) {
     const priceId = process.env.STRIPE_PRICE_ID;
     if (!priceId) return NextResponse.json({ ok: false, error: "Missing STRIPE_PRICE_ID" }, { status: 500 });
 
+    const stripe = getStripe();
     const baseUrl = getBaseUrl();
 
     const session = await stripe.checkout.sessions.create({

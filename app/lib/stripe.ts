@@ -1,5 +1,19 @@
 import Stripe from "stripe";
 
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-01-27.acacia",
-});
+let stripeSingleton: Stripe | null = null;
+
+export function getStripe() {
+  if (stripeSingleton) return stripeSingleton;
+
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) {
+    // Dôležité: NEHÁDŽ toto pri importe route. Toto sa zavolá až v requeste.
+    throw new Error("Missing STRIPE_SECRET_KEY");
+  }
+
+  stripeSingleton = new Stripe(key, {
+    apiVersion: "2025-12-15.clover",
+  });
+
+  return stripeSingleton;
+}

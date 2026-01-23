@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { analogies } from "./analogies";
 import { notes } from "./notes";
 import { unknownItems } from "./unknownList";
-import { blurredItems } from "./blurredFacts";
+import { unknownItems as blurredItems } from "./blurredFacts";
 import { paywallCopy } from "./paywallCopy";
 import famousBirthdays from "./famousBirthdays.json";
 
