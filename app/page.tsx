@@ -8,6 +8,7 @@ import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
 
 type FamousEntry = { name: string; year?: number; note?: string };
+
 const famousBirthdays = famousBirthdaysRaw as unknown as Record<string, FamousEntry[]>;
 
 function pad2(n: number) {
@@ -117,10 +118,12 @@ function birthdayCountdownLine(toNext: number, seed: string) {
   ];
   return pick(variants, seed).replace("{n}", String(toNext));
 }
+
 function analogyLine(days: number, seed: string) {
   const a = pick(analogies, seed);
   return a.text.replace("{days}", String(days));
 }
+
 function chineseZodiacLine(cz: string, seed: string) {
   const dict = (notes as any).chineseZodiacByAnimal as Record<string, readonly string[]> | undefined;
   const list = dict?.[cz];
@@ -150,10 +153,8 @@ function calcUnknownNumbers(days: number, age: number, seed: string) {
   return { breaths, heart, blinks, decisions, influenced };
 }
 
-/** localStorage keys */
-const LS_NAME = "coso_name";
-const LS_BIRTH = "coso_birthISO";
-const LS_PAID_PREFIX = "coso_paid_"; // coso_paid_<rid> = "1"
+const LS_LAST = "coso:lastInput:v1";
+const LS_PAID_RID = "coso:paidRid:v1";
 
 export default function Home() {
   const [name, setName] = useState("");
@@ -164,33 +165,24 @@ export default function Home() {
   const [isPaid, setIsPaid] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
-  // 1) Obnov vstupy po refresh (aby po Stripe návrate nebola app “prázdna”)
+  // 1) pri štarte obnovíme posledný vstup (aby po Stripe návrate nebolo prázdno)
   useEffect(() => {
     try {
-      const savedName = localStorage.getItem(LS_NAME) ?? "";
-      const savedBirth = localStorage.getItem(LS_BIRTH) ?? "";
-      if (savedName && !name) setName(savedName);
-      if (savedBirth && !birthISO) setBirthISO(savedBirth);
-
-      const params = new URLSearchParams(window.location.search);
-      const hasSession = !!params.get("session_id");
-      const hasRid = !!params.get("rid");
-
-      // keď sa vrátiš zo Stripe (alebo máš share link), rovno skoč do “výsledku”
-      if ((hasSession || hasRid) && !submitted) {
-        setSubmitted(true);
-      }
+      const raw = localStorage.getItem(LS_LAST);
+      if (!raw) return;
+      const obj = JSON.parse(raw) as { name?: string; birthISO?: string; submitted?: boolean };
+      if (typeof obj.name === "string") setName(obj.name);
+      if (typeof obj.birthISO === "string") setBirthISO(obj.birthISO);
+      if (obj.submitted) setSubmitted(true);
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2) Priebežne si ukladaj vstupy (aby sa nestratili po refresh)
+  // 2) vždy keď sa mení vstup/submitted, uložíme ho (persist)
   useEffect(() => {
     try {
-      if (name) localStorage.setItem(LS_NAME, name);
-      if (birthISO) localStorage.setItem(LS_BIRTH, birthISO);
+      localStorage.setItem(LS_LAST, JSON.stringify({ name, birthISO, submitted }));
     } catch {}
-  }, [name, birthISO]);
+  }, [name, birthISO, submitted]);
 
   const computed = useMemo(() => {
     if (!submitted) return null;
@@ -220,9 +212,21 @@ export default function Home() {
     const nums = calcUnknownNumbers(alive, age, `${key}|unknown|${cleanName}`);
 
     const vitals = [
-      { title: "Počet úderov srdca", value: `Približne ${formatNumber(nums.heart)} úderov srdca.`, note: "Väčšina z nich bez toho, aby si si to uvedomil." },
-      { title: "Počet nádychov", value: `Asi ${formatNumber(nums.breaths)} nádychov.`, note: "Každý z nich ťa držal o chvíľu dlhšie tu." },
-      { title: "Počet žmurknutí", value: `Cca ${formatNumber(nums.blinks)} žmurknutí.`, note: "Medzi nimi sa odohral celý tvoj svet." },
+      {
+        title: "Počet úderov srdca",
+        value: `Približne ${formatNumber(nums.heart)} úderov srdca.`,
+        note: "Väčšina z nich bez toho, aby si si to uvedomil.",
+      },
+      {
+        title: "Počet nádychov",
+        value: `Asi ${formatNumber(nums.breaths)} nádychov.`,
+        note: "Každý z nich ťa držal o chvíľu dlhšie tu.",
+      },
+      {
+        title: "Počet žmurknutí",
+        value: `Cca ${formatNumber(nums.blinks)} žmurknutí.`,
+        note: "Medzi nimi sa odohral celý tvoj svet.",
+      },
     ] as const;
 
     const blurredUnknown = unknownItems.map((it) => {
@@ -259,23 +263,27 @@ export default function Home() {
 
   const canSubmit = name.trim().length > 0 && !!parseISODate(birthISO);
 
-  // 3) Overenie: spusti hneď po tom, čo máme URL parametre (nezávisle od computed)
+  // 3) Základná logika odomykania: odomkne sa iba vtedy, ak "zaplatené rid" sa rovná aktuálnemu výsledku
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!submitted) return;
+    if (!computed || "error" in computed) return;
+
+    try {
+      const paidRid = localStorage.getItem(LS_PAID_RID);
+      setIsPaid(paidRid === computed.resultId);
+    } catch {
+      setIsPaid(false);
+    }
+  }, [submitted, computed?.resultId]);
+
+  // 4) návrat zo Stripe + overenie platby (a uloženie presného resultId, ktorý bol zaplatený)
+  useEffect(() => {
+    if (!submitted) return;
+    if (!computed || "error" in computed) return;
 
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
-    const rid = params.get("rid");
 
-    // ak už máme uložené “paid” lokálne, odomkni hneď (napr. refresh)
-    if (rid) {
-      try {
-        const paid = localStorage.getItem(LS_PAID_PREFIX + rid) === "1";
-        if (paid) setIsPaid(true);
-      } catch {}
-    }
-
-    // návrat zo Stripe → over cez API
     if (!sessionId) return;
 
     setVerifying(true);
@@ -287,46 +295,32 @@ export default function Home() {
       .then((r) => r.json())
       .then((data) => {
         if (data?.paid) {
-          setIsPaid(true);
+          // toto je kľúč: zaplatenie viažeme na konkrétny resultId zo Stripe metadata
+          const paidResultId = typeof data?.resultId === "string" ? data.resultId : computed.resultId;
+          try {
+            localStorage.setItem(LS_PAID_RID, paidResultId);
+          } catch {}
+          setIsPaid(paidResultId === computed.resultId);
           setPaywallOpen(false);
-
-          // ulož odomknutie na rid (ak je)
-          const effectiveRid = (typeof data?.resultId === "string" && data.resultId) || rid;
-          if (effectiveRid) {
-            try {
-              localStorage.setItem(LS_PAID_PREFIX + effectiveRid, "1");
-            } catch {}
-          }
         }
+
+        // vyčisti URL
+        const url = new URL(window.location.href);
+        url.searchParams.delete("session_id");
+        url.searchParams.delete("rid");
+        window.history.replaceState({}, "", url.toString());
       })
-      .finally(() => {
-        // vyčisti URL aby sa to neopakovalo
-        try {
-          const url = new URL(window.location.href);
-          url.searchParams.delete("session_id");
-          url.searchParams.delete("rid");
-          window.history.replaceState({}, "", url.toString());
-        } catch {}
-        setVerifying(false);
-      });
-  }, []);
+      .finally(() => setVerifying(false));
+  }, [submitted, computed]);
 
   async function startCheckout(resultId: string) {
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ resultId }),
-      });
-      const data = await res.json();
-      if (data?.url) {
-        window.location.href = data.url;
-        return;
-      }
-      alert(data?.error ?? "Checkout: niečo sa pokazilo.");
-    } catch (e: any) {
-      alert(e?.message ?? "Checkout error");
-    }
+    const res = await fetch("/api/stripe/checkout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ resultId }),
+    });
+    const data = await res.json();
+    if (data?.url) window.location.href = data.url;
   }
 
   return (
@@ -350,14 +344,7 @@ export default function Home() {
               className="w-full rounded-xl bg-neutral-950 border border-neutral-800 px-3 py-2 outline-none focus:border-neutral-600"
             />
             <button
-              onClick={() => {
-                // ulož a choď
-                try {
-                  localStorage.setItem(LS_NAME, name);
-                  localStorage.setItem(LS_BIRTH, birthISO);
-                } catch {}
-                setSubmitted(true);
-              }}
+              onClick={() => setSubmitted(true)}
               disabled={!canSubmit}
               className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold disabled:opacity-40 disabled:cursor-not-allowed"
             >
@@ -371,7 +358,14 @@ export default function Home() {
           <div className="mt-6 text-sm text-red-300">
             {computed.error}
             <div className="mt-3">
-              <button onClick={() => setSubmitted(false)} className="underline">
+              <button
+                onClick={() => {
+                  setSubmitted(false);
+                  setPaywallOpen(false);
+                  setIsPaid(false);
+                }}
+                className="underline"
+              >
                 Späť
               </button>
             </div>
@@ -491,7 +485,14 @@ export default function Home() {
                   <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
                   <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
                 </div>
-                <button onClick={() => setSubmitted(false)} className="underline">
+                <button
+                  onClick={() => {
+                    setSubmitted(false);
+                    setPaywallOpen(false);
+                    setIsPaid(false);
+                  }}
+                  className="underline"
+                >
                   Skúsiť znova
                 </button>
               </div>
@@ -548,10 +549,7 @@ export default function Home() {
 
             <div className="mt-5 text-sm text-neutral-200 font-semibold">{paywallCopy.howToContinue}</div>
 
-            <button
-              className="mt-3 w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold"
-              onClick={() => startCheckout(computed.resultId)}
-            >
+            <button className="mt-3 w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold" onClick={() => startCheckout(computed.resultId)}>
               {paywallCopy.fastPayBtn}
             </button>
             <div className="text-xs text-neutral-400 mt-2">{paywallCopy.fastPayNote}</div>
