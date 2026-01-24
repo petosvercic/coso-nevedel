@@ -12,7 +12,6 @@ export type FactSectionKey =
 export type FactTitle = {
   id: string;
   title: string;
-  // ak chceš, môžeš neskôr pridať tagy typu: tone, intensity, etc.
 };
 
 export const factTitles: Record<FactSectionKey, readonly FactTitle[]> = {
