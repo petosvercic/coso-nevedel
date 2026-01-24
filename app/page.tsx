@@ -7,8 +7,9 @@ import { unknownItems } from "./data/unknownList";
 import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
 
-type FamousEntry = { name: string; year?: number; note?: string };
+import { buildFactBlocks } from "./lib/factLogic";
 
+type FamousEntry = { name: string; year?: number; note?: string };
 const famousBirthdays = famousBirthdaysRaw as unknown as Record<string, FamousEntry[]>;
 
 function pad2(n: number) {
@@ -83,30 +84,14 @@ function pick<T>(arr: readonly T[], seed: string) {
   const idx = hashString(seed) % arr.length;
   return arr[idx];
 }
-function formatNumber(n: number) {
-  return Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
-}
 function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
 
-function zodiacVibe(z: string) {
-  const map: Record<string, string[]> = {
-    Vodnár: ["Vodnár = hlava v oblakoch, nohy v realite. Občas naopak.", "Vodnár: originál, ktorý sa tvári, že mu na tom nezáleží."],
-    Ryby: ["Ryby: empatia na plné pecky. Aj keď sa tváriš, že nie.", "Ryby: vieš vycítiť náladu miestnosti skôr, než si sadneš."],
-    Baran: ["Baran: impulz je tvoja obľúbená forma plánovania.", "Baran: keď chceš, ideš. Keď nechceš, aj tak ideš."],
-    Býk: ["Býk: trpezlivosť… až kým nie.", "Býk: stabilita, pohodlie, a potom tvrdohlavosť ako bonus."],
-    Blíženci: ["Blíženci: dve myšlienky naraz, minimum nudy.", "Blíženci: komunikácia je šport. Niekedy kontaktný."],
-    Rak: ["Rak: lojalita je tvoja superschopnosť.", "Rak: pamätáš si veci, ktoré iní už dávno vytesnili."],
-    Lev: ["Lev: charisma, ktoré sa tvári nenápadne. Neúspešne.", "Lev: keď svietiš, miestnosť si to všimne."],
-    Panna: ["Panna: detail je náboženstvo.", "Panna: poriadok v chaose… alebo aspoň pokus."],
-    Váhy: ["Váhy: hľadáš rovnováhu, aj keď si ju musíš vymyslieť.", "Váhy: diplomacia. A občas tiché súdy v hlave."],
-    Škorpión: ["Škorpión: intuícia, ktorá občas desí aj teba.", "Škorpión: ideš do hĺbky, aj keď je tam tma."],
-    Strelec: ["Strelec: sloboda je tvoj default.", "Strelec: zvedavosť ťa dostane ďaleko. Aj do problémov."],
-    Kozorožec: ["Kozorožec: disciplína, čo vyzerá ako chlad.", "Kozorožec: cieľ je cieľ. Aj keď to trvá."],
-  };
-  const list = map[z] ?? ["Znamenie je len štítok. Ty si komplikovanejší."];
-  return pick(list, `z|${z}`);
+function zodiacVibeFromNotes(z: string, seed: string) {
+  // preferuj nový pool v notes.westernZodiac
+  const line = pick(notes.westernZodiac, `${seed}|west|${z}`);
+  return line.replace("{zodiac}", z);
 }
 
 function birthdayCountdownLine(toNext: number, seed: string) {
@@ -129,28 +114,6 @@ function chineseZodiacLine(cz: string, seed: string) {
   const list = dict?.[cz];
   const line = list?.length ? pick(list, `${seed}|cz|${cz}`) : `${cz}: (popis sa niekde stratil, čo je tiež istý typ osudu).`;
   return line;
-}
-
-function calcUnknownNumbers(days: number, age: number, seed: string) {
-  const seedN = hashString(seed);
-
-  const breathsPerMin = 12 + (seedN % 7); // 12..18
-  const breaths = days * 24 * 60 * breathsPerMin;
-
-  const bpm = 60 + ((seedN >>> 3) % 36); // 60..95
-  const heart = days * 24 * 60 * bpm;
-
-  const blinksPerMin = 10 + ((seedN >>> 6) % 11); // 10..20
-  const blinks = days * 16 * 60 * blinksPerMin;
-
-  const decisionsPerDay = 200 + ((seedN >>> 9) % 2301);
-  const decisions = days * decisionsPerDay;
-
-  const base = 30 + age * 25;
-  const jitter = (seedN >>> 12) % 400;
-  const influenced = Math.max(30, Math.min(2500, base + jitter));
-
-  return { breaths, heart, blinks, decisions, influenced };
 }
 
 const LS_LAST = "coso:lastInput:v1";
@@ -199,7 +162,9 @@ export default function Home() {
     const age = getAge(birth);
     const toNext = daysUntilNextBirthday(birth);
 
-    const vibe = zodiacVibe(zodiac);
+    const resultId = makeResultId(cleanName, birthISO);
+
+    const vibe = zodiacVibeFromNotes(zodiac, `${key}|${cleanName}`);
     const bdayLine = birthdayCountdownLine(toNext, `${key}|bd|${cleanName}`);
     const aliveLine = analogyLine(alive, `${key}|alive|${cleanName}`);
 
@@ -209,35 +174,21 @@ export default function Home() {
     const czLine = chineseZodiacLine(cz, `${key}|cz|${cleanName}`);
     const curLine = pick(notes.famous, `${key}|cur|${cleanName}`);
 
-    const nums = calcUnknownNumbers(alive, age, `${key}|unknown|${cleanName}`);
-
-    const vitals = [
-      {
-        title: "Počet úderov srdca",
-        value: `Približne ${formatNumber(nums.heart)} úderov srdca.`,
-        note: "Väčšina z nich bez toho, aby si si to uvedomil.",
-      },
-      {
-        title: "Počet nádychov",
-        value: `Asi ${formatNumber(nums.breaths)} nádychov.`,
-        note: "Každý z nich ťa držal o chvíľu dlhšie tu.",
-      },
-      {
-        title: "Počet žmurknutí",
-        value: `Cca ${formatNumber(nums.blinks)} žmurknutí.`,
-        note: "Medzi nimi sa odohral celý tvoj svet.",
-      },
-    ] as const;
-
-    const blurredUnknown = unknownItems.map((it) => {
-      let nStr = "???";
-      const t = it.title.toLowerCase();
-      if (t.includes("rozhod")) nStr = formatNumber(nums.decisions);
-      if (t.includes("ovplyv")) nStr = formatNumber(nums.influenced);
-      return { title: it.title, fullText: it.blurredHint.replace("{n}", nStr) };
+    // ✅ NOVÉ: “blbosti” fakty (deterministické, profilové)
+    const factBlocks = buildFactBlocks({
+      name: cleanName,
+      dobISO: birthISO,
+      rid: resultId,
+      daysAlive: alive,
     });
 
-    const resultId = makeResultId(cleanName, birthISO);
+    // Paywall blur list (stále zachováme)
+    const blurredUnknown = unknownItems.map((it, idx) => {
+      // len aby bolo čo blur-núť, dáme pseudo-n pre každý item
+      const n = (hashString(`${resultId}|u|${idx}`) % 900) + 40;
+      return { title: it.title, fullText: it.blurredHint.replace("{n}", String(n)) };
+    });
+
     const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
 
     return {
@@ -255,7 +206,7 @@ export default function Home() {
       czLine,
       famousName: famous ? `${famous.name}${typeof famous.year === "number" ? ` (${famous.year})` : ""}` : null,
       curLine,
-      vitals,
+      factBlocks,
       blurredUnknown,
       postPaidFooter,
     };
@@ -295,7 +246,6 @@ export default function Home() {
       .then((r) => r.json())
       .then((data) => {
         if (data?.paid) {
-          // toto je kľúč: zaplatenie viažeme na konkrétny resultId zo Stripe metadata
           const paidResultId = typeof data?.resultId === "string" ? data.resultId : computed.resultId;
           try {
             localStorage.setItem(LS_PAID_RID, paidResultId);
@@ -304,7 +254,6 @@ export default function Home() {
           setPaywallOpen(false);
         }
 
-        // vyčisti URL
         const url = new URL(window.location.href);
         url.searchParams.delete("session_id");
         url.searchParams.delete("rid");
@@ -409,21 +358,37 @@ export default function Home() {
               </div>
             </section>
 
+            {/* ✅ NOVÁ SEKCIa: FACT BLOCKS */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">Čo ďalej určite nevieš:</h2>
+              <h2 className="font-semibold">{pick(notes.blurredIntro, `${computed.resultId}|intro`)}</h2>
 
-              <div className="mt-3 space-y-2 text-sm text-neutral-200">
-                {computed.vitals.map((v, i) => (
-                  <div key={i} className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2">
-                    <div className="text-neutral-400">{v.title}</div>
-                    <div className="text-neutral-100">{v.value}</div>
-                    <div className="text-neutral-400">{v.note}</div>
+              <div className="mt-4 space-y-5">
+                {computed.factBlocks.map((block) => (
+                  <div key={block.section}>
+                    <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+                    <div className="space-y-2">
+                      {block.rows.map((row) => (
+                        <div
+                          key={row.id}
+                          className={
+                            isPaid
+                              ? "rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
+                              : "rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
+                          }
+                          title={isPaid ? "" : "odblokuje sa po zaplatení"}
+                        >
+                          <div className="text-neutral-300">{row.title}</div>
+                          <div className="text-neutral-100 font-semibold">{row.value}</div>
+                          {row.note && <div className="text-neutral-400">{row.note}</div>}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
-                <div className="text-neutral-300 italic">Telo má presnejšiu pamäť než hlava.</div>
               </div>
 
-              <ul className="mt-4 list-disc list-inside text-sm text-neutral-200 space-y-1">
+              {/* STARÝ paywall list necháme ako “teaser” */}
+              <ul className="mt-6 list-disc list-inside text-sm text-neutral-200 space-y-1">
                 {computed.blurredUnknown.map((u, i) => (
                   <li key={i}>{u.title}</li>
                 ))}
