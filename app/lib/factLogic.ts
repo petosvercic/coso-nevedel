@@ -45,32 +45,26 @@ function note(rng: RNG): string {
   return NOTES_GENERIC[Math.floor(rng() * NOTES_GENERIC.length)];
 }
 
-/**
- * FULL režim: vždy máš “bohatý obraz”.
- * Pred platbou sa len schováva hodnota, nie samotné otázky.
- */
-function chooseSections(rng: RNG, profile: Profile): FactSectionKey[] {
-  // Core – user chce vidieť aj Meno + Telo vždy
-  const core: FactSectionKey[] = ["social", "time", "name", "body"];
+function chooseCoreSections(): FactSectionKey[] {
+  // Viditeľné pred platbou
+  return ["social", "time", "name", "body"];
+}
 
-  // Extra – jemne temné vrstvy navyše
-  const extras: FactSectionKey[] = [];
+function chooseExtraSections(rng: RNG, profile: Profile): FactSectionKey[] {
+  // Pribudnú až po platbe
+  const pool: FactSectionKey[] = ["mind", "meta", "weird"];
 
   const wantsWeird = profile.chaos + profile.intensity > 1.05;
   const wantsMeta = profile.control > 0.52 || profile.intensity > 0.6;
 
-  if (wantsWeird) extras.push("weird");
-  if (wantsMeta) extras.push("meta");
-  extras.push("mind"); // vždy aspoň trochu “hlavy”
+  const biased: FactSectionKey[] = [];
+  if (wantsWeird) biased.push("weird");
+  if (wantsMeta) biased.push("meta");
+  biased.push("mind"); // vždy aspoň jedna “hlava”
 
-  // vyber 2 extras deterministicky
-  const unique = [...new Set(extras)];
-  const picked = pickManyUnique(rng, unique, 2);
-
-  const all = [...new Set([...core, ...picked])];
-
-  // cieľ: 6 sekcií (core 4 + 2 extra)
-  return all.slice(0, 6);
+  // vyber 2 z (biased + pool) deterministicky, bez duplicít
+  const unique = [...new Set([...biased, ...pool])];
+  return pickManyUnique(rng, unique, 2);
 }
 
 function pickTitlesForSection(rng: RNG, section: FactSectionKey, count: number): FactTitle[] {
@@ -111,36 +105,15 @@ function makeCount(rng: RNG, profile: Profile, section: FactSectionKey, daysAliv
   let min = 20;
   let max = 400;
 
-  if (section === "social") {
-    min = 40;
-    max = 900;
-  }
-  if (section === "time") {
-    min = 20;
-    max = 420;
-  }
-  if (section === "mind") {
-    min = 60;
-    max = 1400;
-  }
-  if (section === "body") {
-    min = 30;
-    max = 800;
-  }
-  if (section === "name") {
-    min = 2000;
-    max = 220_000;
-  }
-  if (section === "meta") {
-    min = 30;
-    max = 650;
-  }
-  if (section === "weird") {
-    min = 8;
-    max = 220;
-  }
+  if (section === "social") { min = 40; max = 900; }
+  if (section === "time")   { min = 20; max = 420; }
+  if (section === "mind")   { min = 60; max = 1400; }
+  if (section === "body")   { min = 30; max = 800; }
+  if (section === "name")   { min = 2000; max = 220_000; }
+  if (section === "meta")   { min = 30; max = 650; }
+  if (section === "weird")  { min = 8;  max = 220; }
 
-  const widen = 1 + profile.chaos * 0.9 + profile.intensity * 0.6;
+  const widen = 1 + (profile.chaos * 0.9) + (profile.intensity * 0.6);
   const low = Math.round(min * lifeScale);
   const high = Math.round(max * lifeScale * widen);
 
@@ -179,23 +152,16 @@ function makeValue(
   return makeRange(rng, profile, section, daysAlive);
 }
 
-export function buildFactBlocks(input: {
-  name: string;
-  dobISO: string;
-  rid: string;
+function buildBlocksForSections(args: {
+  rng: RNG;
+  profile: Profile;
   daysAlive: number;
-  rowsPerSection?: { min: number; max: number };
+  sections: FactSectionKey[];
+  usedTitleIds: Set<string>;
+  rowsMin: number;
+  rowsMax: number;
 }): FactBlock[] {
-  const seedStr = `${input.name}|${input.dobISO}|${input.rid}|facts`;
-  const rng = makeRng(seedStr);
-  const profile = buildProfile(rng, input.name, input.dobISO);
-
-  // FULL default: viac riadkov, aby pred paywallom videli “koľko toho je”
-  const rowsMin = input.rowsPerSection?.min ?? 5;
-  const rowsMax = input.rowsPerSection?.max ?? 7;
-
-  const sections = chooseSections(rng, profile);
-  const usedTitleIds = new Set<string>();
+  const { rng, profile, daysAlive, sections, usedTitleIds, rowsMin, rowsMax } = args;
 
   const blocks: FactBlock[] = [];
 
@@ -205,13 +171,11 @@ export function buildFactBlocks(input: {
     const pool = factTitles[section];
     const picked: FactTitle[] = [];
 
-    // najprv unique picks
     for (const t of pickTitlesForSection(rng, section, want)) {
       if (!usedTitleIds.has(t.id)) picked.push(t);
       if (picked.length >= want) break;
     }
 
-    // doťukni na požadovaný počet
     while (picked.length < want && picked.length < pool.length) {
       const candidate = pool[Math.floor(rng() * pool.length)];
       if (!usedTitleIds.has(candidate.id)) picked.push(candidate);
@@ -220,7 +184,7 @@ export function buildFactBlocks(input: {
     const rows: FactRow[] = picked.map((t) => {
       usedTitleIds.add(t.id);
       const kind = decideKind(rng, section, profile);
-      const value = makeValue(rng, profile, section, kind, input.daysAlive);
+      const value = makeValue(rng, profile, section, kind, daysAlive);
 
       return {
         id: t.id,
@@ -240,4 +204,53 @@ export function buildFactBlocks(input: {
   }
 
   return blocks;
+}
+
+export function buildFactBlocks(input: {
+  name: string;
+  dobISO: string;
+  rid: string;
+  daysAlive: number;
+  isPaid?: boolean;
+  rowsCore?: { min: number; max: number };
+  rowsExtra?: { min: number; max: number };
+}): FactBlock[] {
+  const seedStr = `${input.name}|${input.dobISO}|${input.rid}|facts`;
+  const rng = makeRng(seedStr);
+  const profile = buildProfile(rng, input.name, input.dobISO);
+
+  const usedTitleIds = new Set<string>();
+
+  const core = chooseCoreSections();
+  const extra = chooseExtraSections(rng, profile);
+
+  const coreMin = input.rowsCore?.min ?? 5;
+  const coreMax = input.rowsCore?.max ?? 7;
+
+  const extraMin = input.rowsExtra?.min ?? 4;
+  const extraMax = input.rowsExtra?.max ?? 6;
+
+  const coreBlocks = buildBlocksForSections({
+    rng,
+    profile,
+    daysAlive: input.daysAlive,
+    sections: core,
+    usedTitleIds,
+    rowsMin: coreMin,
+    rowsMax: coreMax,
+  });
+
+  if (!input.isPaid) return coreBlocks;
+
+  const extraBlocks = buildBlocksForSections({
+    rng,
+    profile,
+    daysAlive: input.daysAlive,
+    sections: extra,
+    usedTitleIds,
+    rowsMin: extraMin,
+    rowsMax: extraMax,
+  });
+
+  return [...coreBlocks, ...extraBlocks];
 }

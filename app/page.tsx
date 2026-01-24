@@ -6,12 +6,9 @@ import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
 import { buildFactBlocks } from "./lib/factLogic";
 
-function pad2(n: number) {
-  return String(n).padStart(2, "0");
-}
-function mmdd(date: Date) {
-  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-}
+function pad2(n: number) { return String(n).padStart(2, "0"); }
+function mmdd(date: Date) { return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`; }
+
 function parseISODate(iso: string): Date | null {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
@@ -22,18 +19,21 @@ function parseISODate(iso: string): Date | null {
   if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
   return dt;
 }
+
 function daysAlive(birth: Date, now = new Date()) {
   const ms = 24 * 60 * 60 * 1000;
   const b = Date.UTC(birth.getFullYear(), birth.getMonth(), birth.getDate());
   const n = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.max(0, Math.floor((n - b) / ms));
 }
+
 function getAge(birth: Date, now = new Date()) {
   let age = now.getFullYear() - birth.getFullYear();
   const m = now.getMonth() - birth.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
   return age;
 }
+
 function daysUntilNextBirthday(birth: Date, now = new Date()) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const thisYear = new Date(now.getFullYear(), birth.getMonth(), birth.getDate());
@@ -60,6 +60,7 @@ function westernZodiac(date: Date) {
   if ((m === 11 && d >= 22) || (m === 12 && d <= 21)) return "Strelec";
   return "Kozorožec";
 }
+
 function chineseZodiac(year: number) {
   const animals = ["Potkan", "Byvol", "Tiger", "Zajac", "Drak", "Had", "Kôň", "Koza", "Opica", "Kohút", "Pes", "Prasa"];
   const idx = ((year - 2008) % 12 + 12) % 12;
@@ -74,10 +75,12 @@ function hashString(s: string) {
   }
   return h >>> 0;
 }
+
 function pick<T>(arr: readonly T[], seed: string) {
   const idx = hashString(seed) % arr.length;
   return arr[idx];
 }
+
 function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
@@ -104,10 +107,7 @@ async function shareResult(payload: { title: string; text: string; url: string }
 
 function zodiacVibe(z: string, seed: string) {
   const raw = pick(notes.westernZodiac, `${seed}|west|${z}`);
-  const cleaned = raw
-    .replace(/\{zodiac\}\s*:\s*/gi, "")
-    .replace(/^\s*[^:]{2,20}:\s*/, "")
-    .trim();
+  const cleaned = raw.replace(/\{zodiac\}\s*:\s*/gi, "").replace(/^\s*[^:]{2,20}:\s*/, "").trim();
   return `Narodil si sa v znamení ${z}. ${cleaned}`;
 }
 
@@ -136,7 +136,7 @@ function chineseZodiacLine(cz: string, year: number, seed: string) {
 
 function revealChance(resultId: string, section: string, rowId: string) {
   const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
-  return (h % 100) < 18; // cca 18%
+  return (h % 100) < 18;
 }
 
 async function postTelemetry(payload: any) {
@@ -146,9 +146,7 @@ async function postTelemetry(payload: any) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
     });
-  } catch {
-    // ignore
-  }
+  } catch {}
 }
 
 const LS_LAST = "coso:lastInput:v1";
@@ -203,13 +201,15 @@ export default function Home() {
     const aliveTxt = aliveLine(alive, `${key}|alive|${cleanName}`);
     const czTxt = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
 
-    // FULL dataset vždy. Pred platbou sa len blurujú hodnoty.
+    // Core sekcie vždy, extra sekcie až keď isPaid=true
     const factBlocks = buildFactBlocks({
       name: cleanName,
       dobISO: birthISO,
       rid: resultId,
       daysAlive: alive,
-      rowsPerSection: { min: 5, max: 7 },
+      isPaid,
+      rowsCore: { min: 5, max: 7 },
+      rowsExtra: { min: 4, max: 6 },
     });
 
     const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
@@ -230,7 +230,7 @@ export default function Home() {
       factBlocks,
       postPaidFooter,
     };
-  }, [submitted, name, birthISO]);
+  }, [submitted, name, birthISO, isPaid]);
 
   const canSubmit = name.trim().length > 0 && !!parseISODate(birthISO);
 
@@ -289,18 +289,11 @@ export default function Home() {
       .then((data) => {
         if (data?.paid) {
           const paidResultId = typeof data?.resultId === "string" ? data.resultId : computed.resultId;
-          try {
-            localStorage.setItem(LS_PAID_RID, paidResultId);
-          } catch {}
+          try { localStorage.setItem(LS_PAID_RID, paidResultId); } catch {}
           setIsPaid(paidResultId === computed.resultId);
           setPaywallOpen(false);
 
-          postTelemetry({
-            type: "paid",
-            at: new Date().toISOString(),
-            rid: paidResultId,
-            sessionId,
-          });
+          postTelemetry({ type: "paid", at: new Date().toISOString(), rid: paidResultId, sessionId });
         }
 
         const url = new URL(window.location.href);
@@ -509,7 +502,7 @@ export default function Home() {
                     Pokračovať
                   </button>
                   <div className="text-xs text-neutral-400 mt-2">
-                    Odomkne sa všetko. Tie isté otázky. Len bez závoja.
+                    Odomkne sa všetko. A pribudnú aj vrstvy, ktoré sa bez toho ani neoplatí pozerať.
                   </div>
                 </div>
               )}
