@@ -1,35 +1,45 @@
 import { NextResponse } from "next/server";
-import { getStripe } from "@/app/lib/stripe";
-
-export const runtime = "nodejs";
-
-function getBaseUrl() {
-  if (process.env.NEXT_PUBLIC_BASE_URL) return process.env.NEXT_PUBLIC_BASE_URL;
-  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
-  return "http://localhost:3000";
-}
+import { getStripe } from "../../../lib/stripe";
 
 export async function POST(req: Request) {
   try {
-    const { resultId } = (await req.json()) as { resultId?: string };
-    if (!resultId) return NextResponse.json({ ok: false, error: "Missing resultId" }, { status: 400 });
+    const body = await req.json();
+    const resultId = String(body?.resultId || "");
 
-    const priceId = process.env.STRIPE_PRICE_ID;
-    if (!priceId) return NextResponse.json({ ok: false, error: "Missing STRIPE_PRICE_ID" }, { status: 500 });
+    if (!resultId) {
+      return NextResponse.json({ error: "Missing resultId" }, { status: 400 });
+    }
 
     const stripe = getStripe();
-    const baseUrl = getBaseUrl();
+
+    const origin = req.headers.get("origin") || "http://localhost:3000";
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${baseUrl}/?session_id={CHECKOUT_SESSION_ID}&rid=${encodeURIComponent(resultId)}`,
-      cancel_url: `${baseUrl}/?pay=cancel`,
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "eur",
+            product_data: {
+              name: "Odomknutie výsledku",
+              description: `Výsledok ID: ${resultId}`,
+            },
+            unit_amount: 100, // 1.00 €
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${origin}/?session_id={CHECKOUT_SESSION_ID}&rid=${encodeURIComponent(resultId)}`,
+      cancel_url: `${origin}/?rid=${encodeURIComponent(resultId)}`,
       metadata: { resultId },
     });
 
-    return NextResponse.json({ ok: true, url: session.url }, { status: 200 });
+    return NextResponse.json({ url: session.url });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Checkout error" }, { status: 500 });
+    return NextResponse.json(
+      { error: e?.message || "Stripe checkout failed" },
+      { status: 500 }
+    );
   }
 }

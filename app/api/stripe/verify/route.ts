@@ -1,29 +1,30 @@
 import { NextResponse } from "next/server";
-import { getStripe } from "@/app/lib/stripe";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+import { getStripe } from "../../../lib/stripe";
 
 export async function POST(req: Request) {
   try {
-    // Ak nie je key, neoverujeme (napr. build / preview bez env). Nech API neskladá celý projekt.
-    if (!process.env.STRIPE_SECRET_KEY) {
-      return NextResponse.json({ ok: true, paid: false, resultId: null, reason: "no_key" }, { status: 200 });
-    }
+    const body = await req.json();
+    const sessionId = String(body?.sessionId || "");
 
-    const { sessionId } = (await req.json()) as { sessionId?: string };
     if (!sessionId) {
-      return NextResponse.json({ ok: false, error: "Missing sessionId" }, { status: 400 });
+      return NextResponse.json({ paid: false, error: "Missing sessionId" }, { status: 400 });
     }
 
     const stripe = getStripe();
+
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    const paid = session.payment_status === "paid" && session.status === "complete";
-    const resultId = session.metadata?.resultId ?? null;
+    const paid = session.payment_status === "paid";
 
-    return NextResponse.json({ ok: true, paid, resultId }, { status: 200 });
+    // resultId uložené v metadata, fallback necháš na klientovi
+    const resultId =
+      typeof session.metadata?.resultId === "string" ? session.metadata.resultId : null;
+
+    return NextResponse.json({ paid, resultId });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Verify error" }, { status: 500 });
+    return NextResponse.json(
+      { paid: false, error: e?.message || "Stripe verify failed" },
+      { status: 500 }
+    );
   }
 }
