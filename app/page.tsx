@@ -83,7 +83,7 @@ function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
 
-// -------- SHARE (native share + clipboard fallback)
+// SHARE
 async function shareResult(payload: { title: string; text: string; url: string }) {
   const { title, text, url } = payload;
 
@@ -104,9 +104,8 @@ async function shareResult(payload: { title: string; text: string; url: string }
   }
 }
 
-// -------- text builders
+// text builders
 function zodiacVibe(z: string, seed: string) {
-  // notes.westernZodiac sú už čisté vety, ale pre istotu odfiltrujeme starý formát
   const raw = pick(notes.westernZodiac, `${seed}|west|${z}`);
   const cleaned = raw
     .replace(/\{zodiac\}\s*:\s*/gi, "")
@@ -126,10 +125,8 @@ function birthdayCountdownLine(toNext: number, seed: string) {
 }
 
 function aliveLine(days: number, seed: string) {
-  // použij notes.daysAlive, keď chceš. (analogy ostáva ako druhá vrstva)
   const base = pick(notes.daysAlive, seed).replace("{days}", String(days));
   const a = pick(analogies, `${seed}|an`).text.replace("{days}", String(days));
-  // mix: raz base, raz analogy
   return hashString(seed) % 2 === 0 ? base : a;
 }
 
@@ -140,10 +137,22 @@ function chineseZodiacLine(cz: string, year: number, seed: string) {
   return `V čínskom znamení si sa narodil v roku ${cz} (${year}). ${base}`;
 }
 
-// -------- reveal pred paywallom
+// reveal pred paywallom
 function revealChance(resultId: string, section: string, rowId: string) {
   const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
   return (h % 100) < 18; // cca 18%
+}
+
+async function postTelemetry(payload: any) {
+  try {
+    await fetch("/api/telemetry", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // ignore
+  }
 }
 
 const LS_LAST = "coso:lastInput:v1";
@@ -241,6 +250,32 @@ export default function Home() {
     }
   }, [submitted, computed?.resultId]);
 
+  // telemetry on submit (once)
+  useEffect(() => {
+    if (!submitted) return;
+    if (!computed || "error" in computed) return;
+
+    const payload = {
+      type: "submit",
+      at: new Date().toISOString(),
+      rid: computed.resultId,
+      dobISO: computed.birthISO,
+      nameHash: String(hashString(computed.cleanName.toLowerCase())),
+      nameLen: computed.cleanName.length,
+      zodiac: computed.zodiac,
+      cz: computed.cz,
+      age: computed.age,
+      daysAlive: computed.alive,
+      factSummary: computed.factBlocks.map((b) => ({
+        section: b.section,
+        rows: b.rows.map((r) => ({ id: r.id, value: r.value })),
+      })),
+    };
+
+    postTelemetry(payload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitted, computed?.resultId]);
+
   // verify stripe return
   useEffect(() => {
     if (!submitted) return;
@@ -265,6 +300,14 @@ export default function Home() {
           } catch {}
           setIsPaid(paidResultId === computed.resultId);
           setPaywallOpen(false);
+
+          // telemetry paid
+          postTelemetry({
+            type: "paid",
+            at: new Date().toISOString(),
+            rid: paidResultId,
+            sessionId,
+          });
         }
 
         const url = new URL(window.location.href);
@@ -356,67 +399,53 @@ export default function Home() {
               <h2 className="font-semibold">Ďalšie čísla sú len odhady. Zvláštne je, ako často sedia:</h2>
 
               <div className="mt-4 space-y-6">
-                {computed.factBlocks.map((block) => {
-                  // pred paywallom: max 1 odhalená karta na sekciu
-                  let revealedCount = 0;
+                {computed.factBlocks.map((block) => (
+                  <div key={block.section}>
+                    <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
 
-                  return (
-                    <div key={block.section}>
-                      <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+                    <div className="space-y-2">
+                      {block.rows.map((row) => {
+                        // FIX: vždy renderujeme všetky rows
+                        // pred platbou len blurujeme väčšinu, po platbe všetko odhalíme
+                        const canShow = isPaid || revealChance(computed.resultId, block.section, row.id);
 
-                      <div className="space-y-2">
-                        {block.rows.map((row) => {
-                          const canReveal =
-                            isPaid ||
-                            (() => {
-                              if (revealedCount >= 1) return false;
-                              const ok = revealChance(computed.resultId, block.section, row.id);
-                              if (ok) revealedCount++;
-                              return ok;
-                            })();
+                        const valueText = canShow ? row.value : "— — —";
+                        const noteText = row.note ? (canShow ? row.note : "Odomkne sa po pokračovaní.") : undefined;
 
-                          const valueText = isPaid ? row.value : canReveal ? row.value : "— — —";
-                          const noteText = isPaid ? row.note : canReveal ? row.note : "Odomkne sa po pokračovaní.";
+                        return (
+                          <div
+                            key={row.id}
+                            className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
+                          >
+                            <div className="text-neutral-300">{row.title}</div>
 
-                          return (
                             <div
-                              key={row.id}
-                              className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
+                              className={
+                                canShow
+                                  ? "text-neutral-100 font-semibold mt-1"
+                                  : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
+                              }
                             >
-                              <div className="text-neutral-300">{row.title}</div>
+                              {valueText}
+                            </div>
 
+                            {noteText && (
                               <div
                                 className={
-                                  isPaid
-                                    ? "text-neutral-100 font-semibold mt-1"
-                                    : canReveal
-                                      ? "text-neutral-100 font-semibold mt-1"
-                                      : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
+                                  canShow
+                                    ? "text-neutral-400 mt-1"
+                                    : "text-neutral-400 mt-1 blur-[1.6px] select-none"
                                 }
                               >
-                                {valueText}
+                                {noteText}
                               </div>
-
-                              {noteText && (
-                                <div
-                                  className={
-                                    isPaid
-                                      ? "text-neutral-400 mt-1"
-                                      : canReveal
-                                        ? "text-neutral-400 mt-1"
-                                        : "text-neutral-400 mt-1 blur-[1.6px] select-none"
-                                  }
-                                >
-                                  {noteText}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
 
               {!isPaid && (
