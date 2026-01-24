@@ -83,11 +83,35 @@ function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
 
+// -------- SHARE (native share + clipboard fallback)
+async function shareResult(payload: { title: string; text: string; url: string }) {
+  const { title, text, url } = payload;
+
+  if (typeof navigator !== "undefined" && (navigator as any).share) {
+    try {
+      await (navigator as any).share({ title, text, url });
+      return { ok: true as const, mode: "native" as const };
+    } catch {
+      return { ok: false as const };
+    }
+  }
+
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url}`);
+    return { ok: true as const, mode: "clipboard" as const };
+  } catch {
+    return { ok: false as const };
+  }
+}
+
+// -------- text builders
 function zodiacVibe(z: string, seed: string) {
-  // toto musí byť ľudská veta. Aj keď notes ešte nie sú upravené,
-  // tu to "obalíme", aby nevzniklo "Vodnár: Vodnár..."
+  // notes.westernZodiac sú už čisté vety, ale pre istotu odfiltrujeme starý formát
   const raw = pick(notes.westernZodiac, `${seed}|west|${z}`);
-  const cleaned = raw.replace(/^(\s*\{zodiac\}\s*:\s*)/i, "").replace(/^\s*[^:]{2,20}:\s*/, "");
+  const cleaned = raw
+    .replace(/\{zodiac\}\s*:\s*/gi, "")
+    .replace(/^\s*[^:]{2,20}:\s*/, "")
+    .trim();
   return `Narodil si sa v znamení ${z}. ${cleaned}`;
 }
 
@@ -101,33 +125,25 @@ function birthdayCountdownLine(toNext: number, seed: string) {
   return pick(variants, seed).replace("{n}", String(toNext));
 }
 
-function analogyLine(days: number, seed: string) {
-  const a = pick(analogies, seed);
-  return a.text.replace("{days}", String(days));
+function aliveLine(days: number, seed: string) {
+  // použij notes.daysAlive, keď chceš. (analogy ostáva ako druhá vrstva)
+  const base = pick(notes.daysAlive, seed).replace("{days}", String(days));
+  const a = pick(analogies, `${seed}|an`).text.replace("{days}", String(days));
+  // mix: raz base, raz analogy
+  return hashString(seed) % 2 === 0 ? base : a;
 }
 
 function chineseZodiacLine(cz: string, year: number, seed: string) {
-  // ak máš v notes rozdelené podľa zvieraťa, použijeme. Inak fallback.
-  const dict = (notes as any).chineseZodiacByAnimal as Record<string, readonly string[]> | undefined;
+  const dict = notes.chineseZodiacByAnimal as Record<string, readonly string[]>;
   const list = dict?.[cz];
-  const base = list?.length
-    ? pick(list, `${seed}|cz|${cz}`)
-    : `Ľudia v tebe vidia mäkkosť. Nevidia, koľko energie stojí byť takýto človek.`;
-
-  // obalíme do ľudskej vety (tvoj požadovaný tvar)
+  const base = list?.length ? pick(list, `${seed}|cz|${cz}`) : "Má to zvláštny tvar. A niekedy to sedí až nepríjemne.";
   return `V čínskom znamení si sa narodil v roku ${cz} (${year}). ${base}`;
 }
 
-/**
- * PAYWALL TEASER:
- * - pred zaplatením ukážeme všetky tasky
- * - ale len 1 odpoveď na sekciu je "odhalená", ostatné sú blur/placeholder
- */
-function shouldRevealRow(resultId: string, section: string, rowId: string): boolean {
-  // deterministicky: 1 odhalená vec na sekciu
+// -------- reveal pred paywallom
+function revealChance(resultId: string, section: string, rowId: string) {
   const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
-  // cca 18% šanca, ale neskôr to ešte "zoškrtíme" per section
-  return (h % 100) < 18;
+  return (h % 100) < 18; // cca 18%
 }
 
 const LS_LAST = "coso:lastInput:v1";
@@ -141,6 +157,7 @@ export default function Home() {
   const [paywallOpen, setPaywallOpen] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [shareMsg, setShareMsg] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -177,10 +194,9 @@ export default function Home() {
     const resultId = makeResultId(cleanName, birthISO);
 
     const vibe = zodiacVibe(zodiac, `${key}|${cleanName}`);
-    const bdayLine = birthdayCountdownLine(toNext, `${key}|bd|${cleanName}`);
-    const aliveLine = analogyLine(alive, `${key}|alive|${cleanName}`);
-
-    const czLine = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
+    const bday = birthdayCountdownLine(toNext, `${key}|bd|${cleanName}`);
+    const aliveTxt = aliveLine(alive, `${key}|alive|${cleanName}`);
+    const czTxt = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
 
     const factBlocks = buildFactBlocks({
       name: cleanName,
@@ -189,10 +205,8 @@ export default function Home() {
       daysAlive: alive,
     });
 
-    const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
-
-    // necháme list "unknownItems" ako teaser po taskoch (bez tých spodných sumárov)
     const teaserTitles = unknownItems.map((u) => u.title);
+    const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
 
     return {
       cleanName,
@@ -204,9 +218,9 @@ export default function Home() {
       age,
       toNext,
       vibe,
-      bdayLine,
-      aliveLine,
-      czLine,
+      bday,
+      aliveTxt,
+      czTxt,
       factBlocks,
       teaserTitles,
       postPaidFooter,
@@ -227,6 +241,7 @@ export default function Home() {
     }
   }, [submitted, computed?.resultId]);
 
+  // verify stripe return
   useEffect(() => {
     if (!submitted) return;
     if (!computed || "error" in computed) return;
@@ -324,26 +339,25 @@ export default function Home() {
               <h2 className="font-semibold">Asi o sebe už vieš:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-2">
                 <div className="text-neutral-300">{computed.vibe}</div>
-                <div className="text-neutral-300">{computed.bdayLine}</div>
+                <div className="text-neutral-300">{computed.bday}</div>
               </div>
             </section>
 
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale možno netušíš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-2">
-                <div className="text-neutral-300">{computed.czLine}</div>
+                <div className="text-neutral-300">{computed.czTxt}</div>
                 <div className="text-neutral-300">Na svete si približne {computed.alive} dní.</div>
-                <div className="text-neutral-300">{computed.aliveLine}</div>
+                <div className="text-neutral-300">{computed.aliveTxt}</div>
               </div>
             </section>
 
-            {/* ✅ HLAVNÁ SEKCIa: TASKY (vždy všetky), odpovede len niektoré pred paywallom */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ďalšie čísla sú len odhady. Zvláštne je, ako často sedia:</h2>
 
               <div className="mt-4 space-y-6">
                 {computed.factBlocks.map((block) => {
-                  // pred paywallom: odhalíme max 1 riadok na sekciu
+                  // pred paywallom: max 1 odhalená karta na sekciu
                   let revealedCount = 0;
 
                   return (
@@ -356,22 +370,13 @@ export default function Home() {
                             isPaid ||
                             (() => {
                               if (revealedCount >= 1) return false;
-                              const ok = shouldRevealRow(computed.resultId, block.section, row.id);
+                              const ok = revealChance(computed.resultId, block.section, row.id);
                               if (ok) revealedCount++;
                               return ok;
                             })();
 
-                          const valueText = isPaid
-                            ? row.value
-                            : canReveal
-                              ? row.value
-                              : "— — —";
-
-                          const noteText = isPaid
-                            ? row.note
-                            : canReveal
-                              ? row.note
-                              : "Odomkne sa po pokračovaní.";
+                          const valueText = isPaid ? row.value : canReveal ? row.value : "— — —";
+                          const noteText = isPaid ? row.note : canReveal ? row.note : "Odomkne sa po pokračovaní.";
 
                           return (
                             <div
@@ -414,12 +419,11 @@ export default function Home() {
                 })}
               </div>
 
-              {/* teaser "čo ešte" - iba názvy, nič viac */}
               {!isPaid && (
                 <div className="mt-6">
                   <div className="text-neutral-400 text-sm mb-2">A ešte pár vecí, ktoré si bežne uvedomíš až spätne:</div>
                   <ul className="list-disc list-inside text-sm text-neutral-200 space-y-1">
-                    {computed.teaserTitles.slice(0, 10).map((t, i) => (
+                    {computed.teaserTitles.slice(0, 12).map((t, i) => (
                       <li key={i}>{t}</li>
                     ))}
                   </ul>
@@ -436,7 +440,6 @@ export default function Home() {
                       </div>
                     ))}
                   </div>
-
                   <div className="mt-4 text-neutral-300 italic">{computed.postPaidFooter}</div>
                 </div>
               )}
@@ -446,17 +449,47 @@ export default function Home() {
                   <span className="text-neutral-500">Vek:</span> {computed.age} rokov ·{" "}
                   <span className="text-neutral-500">Do narodenín:</span> {computed.toNext} dní
                 </div>
-                <button
-                  onClick={() => {
-                    setSubmitted(false);
-                    setPaywallOpen(false);
-                    setIsPaid(false);
-                  }}
-                  className="underline"
-                >
-                  Skúsiť znova
-                </button>
+
+                <div className="flex items-center gap-4">
+                  {isPaid && (
+                    <button
+                      className="underline"
+                      onClick={async () => {
+                        const url = `${window.location.origin}/?rid=${encodeURIComponent(computed.resultId)}`;
+                        const r = await shareResult({
+                          title: "Čo si o sebe určite nevedel",
+                          text: `${computed.cleanName}: teraz už vidíš celý obraz. Skús si to.`,
+                          url,
+                        });
+
+                        if (r.ok) {
+                          setShareMsg(r.mode === "clipboard" ? "Skopírované do schránky." : "Otvorené zdieľanie.");
+                          setTimeout(() => setShareMsg(null), 1800);
+                        } else {
+                          setShareMsg("Zdieľanie sa nepodarilo.");
+                          setTimeout(() => setShareMsg(null), 1800);
+                        }
+                      }}
+                    >
+                      Zdieľať
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => {
+                      setSubmitted(false);
+                      setPaywallOpen(false);
+                      setIsPaid(false);
+                    }}
+                    className="underline"
+                  >
+                    Skúsiť znova
+                  </button>
+                </div>
               </div>
+
+              {shareMsg && <div className="mt-2 text-xs text-neutral-400">{shareMsg}</div>}
+              {verifying && <div className="mt-3 text-xs text-neutral-400">Overujem platbu…</div>}
 
               {!isPaid && (
                 <div className="mt-4">
@@ -466,17 +499,16 @@ export default function Home() {
                   >
                     Pokračovať
                   </button>
-                  <div className="text-xs text-neutral-400 mt-2">Odomkne sa všetko. Bez nových otázok. Len bez závoja.</div>
+                  <div className="text-xs text-neutral-400 mt-2">
+                    Odomkne sa všetko. Bez nových otázok. Len bez závoja.
+                  </div>
                 </div>
               )}
-
-              {verifying && <div className="mt-3 text-xs text-neutral-400">Overujem platbu…</div>}
             </section>
           </div>
         )}
       </div>
 
-      {/* PAYWALL MODAL */}
       {paywallOpen && computed && !("error" in computed) && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6">
           <div className="w-full max-w-xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
@@ -522,7 +554,10 @@ export default function Home() {
             <div className="mt-2 text-sm text-neutral-400 italic">{paywallCopy.closing}</div>
 
             <div className="mt-5 flex gap-3">
-              <button className="w-full rounded-xl border border-neutral-800 py-2 text-neutral-200" onClick={() => setPaywallOpen(false)}>
+              <button
+                className="w-full rounded-xl border border-neutral-800 py-2 text-neutral-200"
+                onClick={() => setPaywallOpen(false)}
+              >
                 Zavrieť
               </button>
             </div>

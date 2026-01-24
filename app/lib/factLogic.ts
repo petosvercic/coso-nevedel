@@ -45,26 +45,21 @@ function note(rng: RNG): string {
   return NOTES_GENERIC[Math.floor(rng() * NOTES_GENERIC.length)];
 }
 
-/**
- * ZMENY:
- * - "name" je vždy v core (aby si mal info o mene stabilne)
- * - "body" častejšie (zjemnená podmienka)
- * - stále ostáva variabilita (max 4 sekcie)
- */
+// ZMENY:
+// - name je vždy (aby sa to nestrácalo)
+// - body častejšie (jemnejšia podmienka)
+// - max 4 sekcie
 function chooseSections(rng: RNG, profile: Profile): FactSectionKey[] {
   const core: FactSectionKey[] = ["social", "time", "name"];
-
   const extraPool: FactSectionKey[] = ["mind", "meta", "body", "weird"];
 
   const wantsWeird = profile.chaos + profile.intensity > 1.05;
-  const wantsBody = profile.control > 0.55; // častejšie než predtým
+  const wantsBody = profile.control > 0.55;
 
   let extras: FactSectionKey[] = [];
-
   if (wantsWeird) extras.push("weird", "meta");
   if (wantsBody) extras.push("body");
 
-  // doplň ešte 1 random sekciu, aby to nebolo stále rovnaké
   extras.push(extraPool[Math.floor(rng() * extraPool.length)]);
 
   const all = [...new Set([...core, ...extras])];
@@ -167,7 +162,7 @@ export function buildFactBlocks(input: {
   const rng = makeRng(seedStr);
   const profile = buildProfile(rng, input.name, input.dobISO);
 
-  const rowsMin = input.rowsPerSection?.min ?? 3; // trocha viac, nech je toho dosť
+  const rowsMin = input.rowsPerSection?.min ?? 3;
   const rowsMax = input.rowsPerSection?.max ?? 4;
 
   const sections = chooseSections(rng, profile);

@@ -15,8 +15,8 @@ export const paywallCopy = {
   ],
   sharingTitle: "Zdieľanie",
   sharingText: [
-    "Po odomknutí získaš certifikát, ktorý potvrdzuje výsledok.",
-    "Výsledok bude možné priamo zdieľať.",
+    "Po odomknutí sa zobrazí tlačidlo „Zdieľať“ priamo pri výsledku.",
+    "Na mobile otvorí systémové zdieľanie, na desktop-e skopíruje link do schránky.",
   ],
   howToContinue: "Ako chceš pokračovať?",
   fastPayBtn: "Rýchla platba kartou / Google Pay",
