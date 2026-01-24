@@ -1,16 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import famousBirthdaysRaw from "./data/famousBirthdays.json";
 import { analogies } from "./data/analogies";
-import { unknownItems } from "./data/unknownList";
 import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
-
+import { unknownItems } from "./data/unknownList";
 import { buildFactBlocks } from "./lib/factLogic";
-
-type FamousEntry = { name: string; year?: number; note?: string };
-const famousBirthdays = famousBirthdaysRaw as unknown as Record<string, FamousEntry[]>;
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -88,18 +83,20 @@ function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
 
-function zodiacVibeFromNotes(z: string, seed: string) {
-  // preferuj nový pool v notes.westernZodiac
-  const line = pick(notes.westernZodiac, `${seed}|west|${z}`);
-  return line.replace("{zodiac}", z);
+function zodiacVibe(z: string, seed: string) {
+  // toto musí byť ľudská veta. Aj keď notes ešte nie sú upravené,
+  // tu to "obalíme", aby nevzniklo "Vodnár: Vodnár..."
+  const raw = pick(notes.westernZodiac, `${seed}|west|${z}`);
+  const cleaned = raw.replace(/^(\s*\{zodiac\}\s*:\s*)/i, "").replace(/^\s*[^:]{2,20}:\s*/, "");
+  return `Narodil si sa v znamení ${z}. ${cleaned}`;
 }
 
 function birthdayCountdownLine(toNext: number, seed: string) {
   const variants = [
-    `{n} dní do narodenín. Už len zistiť, kto to s tebou pôjde osláviť.`,
-    `{n} dní do narodenín. Čas beží. Ty sa tváriš, že nie.`,
     `{n} dní do narodenín. Zvláštne, ako rýchlo sa z “raz” stane “už zase”.`,
+    `{n} dní do narodenín. Čas beží. Ty sa tváriš, že nie.`,
     `{n} dní do narodenín. Ešte dosť času na plán. Aj na výhovorky.`,
+    `{n} dní do narodenín. Je to bližšie, než si pripúšťaš.`,
   ];
   return pick(variants, seed).replace("{n}", String(toNext));
 }
@@ -109,11 +106,28 @@ function analogyLine(days: number, seed: string) {
   return a.text.replace("{days}", String(days));
 }
 
-function chineseZodiacLine(cz: string, seed: string) {
+function chineseZodiacLine(cz: string, year: number, seed: string) {
+  // ak máš v notes rozdelené podľa zvieraťa, použijeme. Inak fallback.
   const dict = (notes as any).chineseZodiacByAnimal as Record<string, readonly string[]> | undefined;
   const list = dict?.[cz];
-  const line = list?.length ? pick(list, `${seed}|cz|${cz}`) : `${cz}: (popis sa niekde stratil, čo je tiež istý typ osudu).`;
-  return line;
+  const base = list?.length
+    ? pick(list, `${seed}|cz|${cz}`)
+    : `Ľudia v tebe vidia mäkkosť. Nevidia, koľko energie stojí byť takýto človek.`;
+
+  // obalíme do ľudskej vety (tvoj požadovaný tvar)
+  return `V čínskom znamení si sa narodil v roku ${cz} (${year}). ${base}`;
+}
+
+/**
+ * PAYWALL TEASER:
+ * - pred zaplatením ukážeme všetky tasky
+ * - ale len 1 odpoveď na sekciu je "odhalená", ostatné sú blur/placeholder
+ */
+function shouldRevealRow(resultId: string, section: string, rowId: string): boolean {
+  // deterministicky: 1 odhalená vec na sekciu
+  const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
+  // cca 18% šanca, ale neskôr to ešte "zoškrtíme" per section
+  return (h % 100) < 18;
 }
 
 const LS_LAST = "coso:lastInput:v1";
@@ -128,7 +142,6 @@ export default function Home() {
   const [isPaid, setIsPaid] = useState(false);
   const [verifying, setVerifying] = useState(false);
 
-  // 1) pri štarte obnovíme posledný vstup (aby po Stripe návrate nebolo prázdno)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LS_LAST);
@@ -140,7 +153,6 @@ export default function Home() {
     } catch {}
   }, []);
 
-  // 2) vždy keď sa mení vstup/submitted, uložíme ho (persist)
   useEffect(() => {
     try {
       localStorage.setItem(LS_LAST, JSON.stringify({ name, birthISO, submitted }));
@@ -164,17 +176,12 @@ export default function Home() {
 
     const resultId = makeResultId(cleanName, birthISO);
 
-    const vibe = zodiacVibeFromNotes(zodiac, `${key}|${cleanName}`);
+    const vibe = zodiacVibe(zodiac, `${key}|${cleanName}`);
     const bdayLine = birthdayCountdownLine(toNext, `${key}|bd|${cleanName}`);
     const aliveLine = analogyLine(alive, `${key}|alive|${cleanName}`);
 
-    const list = famousBirthdays[key] ?? [];
-    const famous = list.length ? list[hashString(`${key}|${cleanName}`) % list.length] : null;
+    const czLine = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
 
-    const czLine = chineseZodiacLine(cz, `${key}|cz|${cleanName}`);
-    const curLine = pick(notes.famous, `${key}|cur|${cleanName}`);
-
-    // ✅ NOVÉ: “blbosti” fakty (deterministické, profilové)
     const factBlocks = buildFactBlocks({
       name: cleanName,
       dobISO: birthISO,
@@ -182,14 +189,10 @@ export default function Home() {
       daysAlive: alive,
     });
 
-    // Paywall blur list (stále zachováme)
-    const blurredUnknown = unknownItems.map((it, idx) => {
-      // len aby bolo čo blur-núť, dáme pseudo-n pre každý item
-      const n = (hashString(`${resultId}|u|${idx}`) % 900) + 40;
-      return { title: it.title, fullText: it.blurredHint.replace("{n}", String(n)) };
-    });
-
     const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
+
+    // necháme list "unknownItems" ako teaser po taskoch (bez tých spodných sumárov)
+    const teaserTitles = unknownItems.map((u) => u.title);
 
     return {
       cleanName,
@@ -204,17 +207,14 @@ export default function Home() {
       bdayLine,
       aliveLine,
       czLine,
-      famousName: famous ? `${famous.name}${typeof famous.year === "number" ? ` (${famous.year})` : ""}` : null,
-      curLine,
       factBlocks,
-      blurredUnknown,
+      teaserTitles,
       postPaidFooter,
     };
   }, [submitted, name, birthISO]);
 
   const canSubmit = name.trim().length > 0 && !!parseISODate(birthISO);
 
-  // 3) Základná logika odomykania: odomkne sa iba vtedy, ak "zaplatené rid" sa rovná aktuálnemu výsledku
   useEffect(() => {
     if (!submitted) return;
     if (!computed || "error" in computed) return;
@@ -227,14 +227,12 @@ export default function Home() {
     }
   }, [submitted, computed?.resultId]);
 
-  // 4) návrat zo Stripe + overenie platby (a uloženie presného resultId, ktorý bol zaplatený)
   useEffect(() => {
     if (!submitted) return;
     if (!computed || "error" in computed) return;
 
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("session_id");
-
     if (!sessionId) return;
 
     setVerifying(true);
@@ -299,7 +297,6 @@ export default function Home() {
             >
               Vyhodnotiť
             </button>
-            <p className="text-xs text-neutral-400">Tlačidlo sa odomkne, keď zadáš meno aj dátum. Aj weby majú hranice.</p>
           </div>
         )}
 
@@ -326,9 +323,7 @@ export default function Home() {
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Asi o sebe už vieš:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-2">
-                <div>
-                  <span className="text-neutral-400">{computed.zodiac}</span> · {computed.vibe}
-                </div>
+                <div className="text-neutral-300">{computed.vibe}</div>
                 <div className="text-neutral-300">{computed.bdayLine}</div>
               </div>
             </section>
@@ -336,79 +331,100 @@ export default function Home() {
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
               <h2 className="font-semibold">Ale možno netušíš že:</h2>
               <div className="mt-2 text-sm text-neutral-200 space-y-2">
-                <div>
-                  Čínske znamenie (rok): <span className="text-neutral-300">{computed.cz}</span>
-                </div>
                 <div className="text-neutral-300">{computed.czLine}</div>
-                <div>
-                  Na svete si približne <span className="text-neutral-300">{computed.alive}</span> dní.
-                </div>
+                <div className="text-neutral-300">Na svete si približne {computed.alive} dní.</div>
                 <div className="text-neutral-300">{computed.aliveLine}</div>
               </div>
             </section>
 
+            {/* ✅ HLAVNÁ SEKCIa: TASKY (vždy všetky), odpovede len niektoré pred paywallom */}
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">Ale určite nevieš že:</h2>
-              <div className="mt-2 text-sm text-neutral-200 space-y-2">
-                <div>
-                  Kuriozita dňa:{" "}
-                  <span className="text-neutral-300">{computed.famousName ?? "(dnes nič extra, ale aj to je výpoveď)"}</span>
-                </div>
-                <div className="text-neutral-400">{computed.curLine}</div>
-              </div>
-            </section>
+              <h2 className="font-semibold">Ďalšie čísla sú len odhady. Zvláštne je, ako často sedia:</h2>
 
-            {/* ✅ NOVÁ SEKCIa: FACT BLOCKS */}
-            <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">{pick(notes.blurredIntro, `${computed.resultId}|intro`)}</h2>
+              <div className="mt-4 space-y-6">
+                {computed.factBlocks.map((block) => {
+                  // pred paywallom: odhalíme max 1 riadok na sekciu
+                  let revealedCount = 0;
 
-              <div className="mt-4 space-y-5">
-                {computed.factBlocks.map((block) => (
-                  <div key={block.section}>
-                    <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
-                    <div className="space-y-2">
-                      {block.rows.map((row) => (
-                        <div
-                          key={row.id}
-                          className={
-                            isPaid
-                              ? "rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
-                              : "rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
-                          }
-                          title={isPaid ? "" : "odblokuje sa po zaplatení"}
-                        >
-                          <div className="text-neutral-300">{row.title}</div>
-                          <div className="text-neutral-100 font-semibold">{row.value}</div>
-                          {row.note && <div className="text-neutral-400">{row.note}</div>}
-                        </div>
-                      ))}
+                  return (
+                    <div key={block.section}>
+                      <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+
+                      <div className="space-y-2">
+                        {block.rows.map((row) => {
+                          const canReveal =
+                            isPaid ||
+                            (() => {
+                              if (revealedCount >= 1) return false;
+                              const ok = shouldRevealRow(computed.resultId, block.section, row.id);
+                              if (ok) revealedCount++;
+                              return ok;
+                            })();
+
+                          const valueText = isPaid
+                            ? row.value
+                            : canReveal
+                              ? row.value
+                              : "— — —";
+
+                          const noteText = isPaid
+                            ? row.note
+                            : canReveal
+                              ? row.note
+                              : "Odomkne sa po pokračovaní.";
+
+                          return (
+                            <div
+                              key={row.id}
+                              className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
+                            >
+                              <div className="text-neutral-300">{row.title}</div>
+
+                              <div
+                                className={
+                                  isPaid
+                                    ? "text-neutral-100 font-semibold mt-1"
+                                    : canReveal
+                                      ? "text-neutral-100 font-semibold mt-1"
+                                      : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
+                                }
+                              >
+                                {valueText}
+                              </div>
+
+                              {noteText && (
+                                <div
+                                  className={
+                                    isPaid
+                                      ? "text-neutral-400 mt-1"
+                                      : canReveal
+                                        ? "text-neutral-400 mt-1"
+                                        : "text-neutral-400 mt-1 blur-[1.6px] select-none"
+                                  }
+                                >
+                                  {noteText}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              {/* STARÝ paywall list necháme ako “teaser” */}
-              <ul className="mt-6 list-disc list-inside text-sm text-neutral-200 space-y-1">
-                {computed.blurredUnknown.map((u, i) => (
-                  <li key={i}>{u.title}</li>
-                ))}
-              </ul>
-
-              <div className="mt-4 space-y-2">
-                {computed.blurredUnknown.map((u, i) => (
-                  <div
-                    key={i}
-                    className={
-                      isPaid
-                        ? "rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
-                        : "rounded bg-neutral-800/50 px-3 py-2 blur-[1.8px] select-none text-neutral-200 text-sm"
-                    }
-                    title={isPaid ? "" : "odblokuje sa po zaplatení"}
-                  >
-                    {u.fullText}
-                  </div>
-                ))}
-              </div>
+              {/* teaser "čo ešte" - iba názvy, nič viac */}
+              {!isPaid && (
+                <div className="mt-6">
+                  <div className="text-neutral-400 text-sm mb-2">A ešte pár vecí, ktoré si bežne uvedomíš až spätne:</div>
+                  <ul className="list-disc list-inside text-sm text-neutral-200 space-y-1">
+                    {computed.teaserTitles.slice(0, 10).map((t, i) => (
+                      <li key={i}>{t}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {isPaid && (
                 <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
@@ -419,26 +435,6 @@ export default function Home() {
                         {l}
                       </div>
                     ))}
-                  </div>
-
-                  <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-900 p-3">
-                    <div className="text-neutral-200 font-semibold">Certifikát výsledku</div>
-                    <div className="text-neutral-400 text-sm mt-1">
-                      Tento výsledok vznikol z tvojho mena a dátumu. Môžeš si ho uložiť alebo zdieľať.
-                    </div>
-                    <div className="text-neutral-500 text-xs mt-2">ID: {computed.resultId}</div>
-
-                    <button
-                      className="mt-3 w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold"
-                      onClick={() => {
-                        const url = window.location.href.split("?")[0] + `?rid=${encodeURIComponent(computed.resultId)}`;
-                        navigator.clipboard?.writeText(url);
-                        alert("Link na zdieľanie skopírovaný.");
-                      }}
-                    >
-                      Zdieľať výsledok
-                    </button>
-                    <div className="text-neutral-500 text-xs mt-2">Nie každý to pochopí. A to je v poriadku.</div>
                   </div>
 
                   <div className="mt-4 text-neutral-300 italic">{computed.postPaidFooter}</div>
@@ -470,7 +466,7 @@ export default function Home() {
                   >
                     Pokračovať
                   </button>
-                  <div className="text-xs text-neutral-400 mt-2">Zvyšok je presnejší. Aj trochu nepríjemnejší.</div>
+                  <div className="text-xs text-neutral-400 mt-2">Odomkne sa všetko. Bez nových otázok. Len bez závoja.</div>
                 </div>
               )}
 
@@ -514,19 +510,13 @@ export default function Home() {
 
             <div className="mt-5 text-sm text-neutral-200 font-semibold">{paywallCopy.howToContinue}</div>
 
-            <button className="mt-3 w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold" onClick={() => startCheckout(computed.resultId)}>
+            <button
+              className="mt-3 w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold"
+              onClick={() => startCheckout(computed.resultId)}
+            >
               {paywallCopy.fastPayBtn}
             </button>
             <div className="text-xs text-neutral-400 mt-2">{paywallCopy.fastPayNote}</div>
-
-            <button
-              className="mt-4 w-full rounded-xl bg-neutral-800 text-neutral-200 py-2 font-semibold opacity-60 cursor-not-allowed"
-              disabled
-              title="MVP: pridáme po prvých dátach (SK/CZ)"
-            >
-              {paywallCopy.smsBtn}
-            </button>
-            <div className="text-xs text-neutral-400 mt-2">{paywallCopy.smsNote}</div>
 
             <div className="mt-5 text-sm text-neutral-300">{paywallCopy.priceLine}</div>
             <div className="mt-2 text-sm text-neutral-400 italic">{paywallCopy.closing}</div>
