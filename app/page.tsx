@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { analogies } from "./data/analogies";
 import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
-import { unknownItems } from "./data/unknownList";
 import { buildFactBlocks } from "./lib/factLogic";
 
 function pad2(n: number) {
@@ -83,7 +82,6 @@ function makeResultId(name: string, birthISO: string) {
   return String(hashString(`${name.trim().toLowerCase()}|${birthISO}`));
 }
 
-// SHARE
 async function shareResult(payload: { title: string; text: string; url: string }) {
   const { title, text, url } = payload;
 
@@ -104,7 +102,6 @@ async function shareResult(payload: { title: string; text: string; url: string }
   }
 }
 
-// text builders
 function zodiacVibe(z: string, seed: string) {
   const raw = pick(notes.westernZodiac, `${seed}|west|${z}`);
   const cleaned = raw
@@ -137,7 +134,6 @@ function chineseZodiacLine(cz: string, year: number, seed: string) {
   return `V čínskom znamení si sa narodil v roku ${cz} (${year}). ${base}`;
 }
 
-// reveal pred paywallom
 function revealChance(resultId: string, section: string, rowId: string) {
   const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
   return (h % 100) < 18; // cca 18%
@@ -207,14 +203,15 @@ export default function Home() {
     const aliveTxt = aliveLine(alive, `${key}|alive|${cleanName}`);
     const czTxt = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
 
+    // FULL dataset vždy. Pred platbou sa len blurujú hodnoty.
     const factBlocks = buildFactBlocks({
       name: cleanName,
       dobISO: birthISO,
       rid: resultId,
       daysAlive: alive,
+      rowsPerSection: { min: 5, max: 7 },
     });
 
-    const teaserTitles = unknownItems.map((u) => u.title);
     const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
 
     return {
@@ -231,7 +228,6 @@ export default function Home() {
       aliveTxt,
       czTxt,
       factBlocks,
-      teaserTitles,
       postPaidFooter,
     };
   }, [submitted, name, birthISO]);
@@ -250,7 +246,6 @@ export default function Home() {
     }
   }, [submitted, computed?.resultId]);
 
-  // telemetry on submit (once)
   useEffect(() => {
     if (!submitted) return;
     if (!computed || "error" in computed) return;
@@ -276,7 +271,6 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [submitted, computed?.resultId]);
 
-  // verify stripe return
   useEffect(() => {
     if (!submitted) return;
     if (!computed || "error" in computed) return;
@@ -301,7 +295,6 @@ export default function Home() {
           setIsPaid(paidResultId === computed.resultId);
           setPaywallOpen(false);
 
-          // telemetry paid
           postTelemetry({
             type: "paid",
             at: new Date().toISOString(),
@@ -405,8 +398,6 @@ export default function Home() {
 
                     <div className="space-y-2">
                       {block.rows.map((row) => {
-                        // FIX: vždy renderujeme všetky rows
-                        // pred platbou len blurujeme väčšinu, po platbe všetko odhalíme
                         const canShow = isPaid || revealChance(computed.resultId, block.section, row.id);
 
                         const valueText = canShow ? row.value : "— — —";
@@ -447,17 +438,6 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-
-              {!isPaid && (
-                <div className="mt-6">
-                  <div className="text-neutral-400 text-sm mb-2">A ešte pár vecí, ktoré si bežne uvedomíš až spätne:</div>
-                  <ul className="list-disc list-inside text-sm text-neutral-200 space-y-1">
-                    {computed.teaserTitles.slice(0, 12).map((t, i) => (
-                      <li key={i}>{t}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
 
               {isPaid && (
                 <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
@@ -529,7 +509,7 @@ export default function Home() {
                     Pokračovať
                   </button>
                   <div className="text-xs text-neutral-400 mt-2">
-                    Odomkne sa všetko. Bez nových otázok. Len bez závoja.
+                    Odomkne sa všetko. Tie isté otázky. Len bez závoja.
                   </div>
                 </div>
               )}

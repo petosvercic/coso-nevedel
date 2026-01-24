@@ -45,25 +45,32 @@ function note(rng: RNG): string {
   return NOTES_GENERIC[Math.floor(rng() * NOTES_GENERIC.length)];
 }
 
-// ZMENY:
-// - name je vždy (aby sa to nestrácalo)
-// - body častejšie (jemnejšia podmienka)
-// - max 4 sekcie
+/**
+ * FULL režim: vždy máš “bohatý obraz”.
+ * Pred platbou sa len schováva hodnota, nie samotné otázky.
+ */
 function chooseSections(rng: RNG, profile: Profile): FactSectionKey[] {
-  const core: FactSectionKey[] = ["social", "time", "name"];
-  const extraPool: FactSectionKey[] = ["mind", "meta", "body", "weird"];
+  // Core – user chce vidieť aj Meno + Telo vždy
+  const core: FactSectionKey[] = ["social", "time", "name", "body"];
+
+  // Extra – jemne temné vrstvy navyše
+  const extras: FactSectionKey[] = [];
 
   const wantsWeird = profile.chaos + profile.intensity > 1.05;
-  const wantsBody = profile.control > 0.55;
+  const wantsMeta = profile.control > 0.52 || profile.intensity > 0.6;
 
-  let extras: FactSectionKey[] = [];
-  if (wantsWeird) extras.push("weird", "meta");
-  if (wantsBody) extras.push("body");
+  if (wantsWeird) extras.push("weird");
+  if (wantsMeta) extras.push("meta");
+  extras.push("mind"); // vždy aspoň trochu “hlavy”
 
-  extras.push(extraPool[Math.floor(rng() * extraPool.length)]);
+  // vyber 2 extras deterministicky
+  const unique = [...new Set(extras)];
+  const picked = pickManyUnique(rng, unique, 2);
 
-  const all = [...new Set([...core, ...extras])];
-  return all.slice(0, 4);
+  const all = [...new Set([...core, ...picked])];
+
+  // cieľ: 6 sekcií (core 4 + 2 extra)
+  return all.slice(0, 6);
 }
 
 function pickTitlesForSection(rng: RNG, section: FactSectionKey, count: number): FactTitle[] {
@@ -104,15 +111,36 @@ function makeCount(rng: RNG, profile: Profile, section: FactSectionKey, daysAliv
   let min = 20;
   let max = 400;
 
-  if (section === "social") { min = 40; max = 900; }
-  if (section === "time")   { min = 20; max = 420; }
-  if (section === "mind")   { min = 60; max = 1400; }
-  if (section === "body")   { min = 30; max = 800; }
-  if (section === "name")   { min = 2000; max = 220_000; }
-  if (section === "meta")   { min = 30; max = 650; }
-  if (section === "weird")  { min = 8;  max = 220; }
+  if (section === "social") {
+    min = 40;
+    max = 900;
+  }
+  if (section === "time") {
+    min = 20;
+    max = 420;
+  }
+  if (section === "mind") {
+    min = 60;
+    max = 1400;
+  }
+  if (section === "body") {
+    min = 30;
+    max = 800;
+  }
+  if (section === "name") {
+    min = 2000;
+    max = 220_000;
+  }
+  if (section === "meta") {
+    min = 30;
+    max = 650;
+  }
+  if (section === "weird") {
+    min = 8;
+    max = 220;
+  }
 
-  const widen = 1 + (profile.chaos * 0.9) + (profile.intensity * 0.6);
+  const widen = 1 + profile.chaos * 0.9 + profile.intensity * 0.6;
   const low = Math.round(min * lifeScale);
   const high = Math.round(max * lifeScale * widen);
 
@@ -162,8 +190,9 @@ export function buildFactBlocks(input: {
   const rng = makeRng(seedStr);
   const profile = buildProfile(rng, input.name, input.dobISO);
 
-  const rowsMin = input.rowsPerSection?.min ?? 3;
-  const rowsMax = input.rowsPerSection?.max ?? 4;
+  // FULL default: viac riadkov, aby pred paywallom videli “koľko toho je”
+  const rowsMin = input.rowsPerSection?.min ?? 5;
+  const rowsMax = input.rowsPerSection?.max ?? 7;
 
   const sections = chooseSections(rng, profile);
   const usedTitleIds = new Set<string>();
@@ -172,13 +201,20 @@ export function buildFactBlocks(input: {
 
   for (const section of sections) {
     const want = intBetween(rng, rowsMin, rowsMax);
-    const picked = pickTitlesForSection(rng, section, want).filter((t) => !usedTitleIds.has(t.id));
 
     const pool = factTitles[section];
-    while (picked.length < want) {
+    const picked: FactTitle[] = [];
+
+    // najprv unique picks
+    for (const t of pickTitlesForSection(rng, section, want)) {
+      if (!usedTitleIds.has(t.id)) picked.push(t);
+      if (picked.length >= want) break;
+    }
+
+    // doťukni na požadovaný počet
+    while (picked.length < want && picked.length < pool.length) {
       const candidate = pool[Math.floor(rng() * pool.length)];
       if (!usedTitleIds.has(candidate.id)) picked.push(candidate);
-      if (picked.length > pool.length) break;
     }
 
     const rows: FactRow[] = picked.map((t) => {
