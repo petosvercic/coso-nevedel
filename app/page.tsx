@@ -6,8 +6,12 @@ import { notes } from "./data/notes";
 import { paywallCopy } from "./data/paywallCopy";
 import { buildFactBlocks } from "./lib/factLogic";
 
-function pad2(n: number) { return String(n).padStart(2, "0"); }
-function mmdd(date: Date) { return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`; }
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+function mmdd(date: Date) {
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
 
 function parseISODate(iso: string): Date | null {
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -134,11 +138,6 @@ function chineseZodiacLine(cz: string, year: number, seed: string) {
   return `V čínskom znamení si sa narodil v roku ${cz} (${year}). ${base}`;
 }
 
-function revealChance(resultId: string, section: string, rowId: string) {
-  const h = hashString(`${resultId}|reveal|${section}|${rowId}`);
-  return (h % 100) < 18;
-}
-
 async function postTelemetry(payload: any) {
   try {
     await fetch("/api/telemetry", {
@@ -148,6 +147,87 @@ async function postTelemetry(payload: any) {
     });
   } catch {}
 }
+
+/**
+ * Minimal token filler (kým engine nepripojíme).
+ * - deterministicky dopĺňa {token} z malých slovníkov
+ * - ak token nepozná, nechá niečo všeobecné
+ */
+function fillTemplate(template: string, seed: string) {
+  const pools: Record<string, readonly string[]> = {
+    polarity: ["pokojné", "ostrý", "premyslené", "intuítívne", "pragmatické"],
+    delay: ["chvíľu ticha", "krátke preverenie", "jeden vnútorný checkpoint", "pauzu na zmysel"],
+    tool: ["pomôcku", "poistku", "mentálny poriadok", "záchrannú brzdu"],
+    disturbance: ["nejasné pravidlá", "lacné emócie", "tiché manipulácie", "chaotické zadania"],
+    sensitiveArea: ["dôveru", "rešpekt", "čas", "slobodu", "princíp"],
+    preference: ["stabilitu", "zmenu", "kombináciu oboch"],
+    condition: ["kontroly", "zmyslu", "férovosti", "voľnosti"],
+    mode: ["v hlave", "na papieri", "cez rozhovor", "cez malé testy"],
+    missingInfo: ["dáta", "čas", "kontext", "spätnú väzbu"],
+    anchor: ["jednu pevnú vec", "najbližší krok", "jednu metriku", "realitu"],
+    selfMetric: ["konzistencie", "výsledku", "čistoty rozhodnutí", "dopadu"],
+    conflictA: ["slobodou", "pohodlím", "pokojom", "istotou"],
+    conflictB: ["istotou", "výkonom", "pravdou", "vzťahom"],
+    energySource: ["ticha", "zmysluplnej práce", "dobrej debaty", "samoty"],
+    distractionType: ["urgentné", "hlasné", "nepodstatné"],
+    function: ["navigáciu", "kalibráciu", "filter", "kompas"],
+    timeView: ["tok", "sériu okien", "prioritný zoznam"],
+    priorityRule: ["dopadu", "zmyslu", "návratnosti", "vnútorného pokoja"],
+    reserveFor: ["ťažké rozhodnutia", "ľudí, na ktorých záleží", "kľúčové projekty"],
+    confidenceTrigger: ["jasného progresu", "dôkazov", "dobrého feedbacku"],
+    coreValue: ["pravdivosť", "férovosť", "slobodu", "zmysel", "autentickosť"],
+    clarity: ["čo sa robí", "čo je cieľ", "čo je dôležité", "čo je výsledok"],
+    meaning: ["zmysel", "dopad", "reálnu hodnotu", "výsledok"],
+    pace: ["po svojom", "v blokoch", "v špičkách", "konzistentne"],
+    focusPoint: ["najbližší krok", "najtvrdší fakt", "jednu vec", "dôsledok"],
+    deadlineType: ["realistické", "jasné", "nefalošné", "dohodnuté"],
+    autonomyArea: ["postupe", "prioritách", "detailoch", "rytme"],
+    feedbackStyle: ["konkrétna", "férová", "vecná", "bez teatrálnosti"],
+    motivationType: ["zmysel", "výzva", "sloboda", "progres"],
+    drainActivity: ["nezmyselným tlakom", "neustálym hasením", "mikromanažmentom", "chaosom"],
+    responsibilityTarget: ["ľudí", "výsledok", "dôveru", "kvalitu"],
+    efficiencyView: ["čistotu postupu", "zníženie hluku", "zisk času", "lepší výstup"],
+    orderForm: ["systém", "zoznam", "štruktúru", "jedno pravidlo"],
+    collaborationTrait: ["sú vecní", "majú ťah", "nekrútia", "držia slovo"],
+    decisionBase: ["dopadu", "dát", "skúsenosti", "najmenšieho rizika"],
+    riskJustification: ["dobrý pomer", "zmysel", "silný dôvod", "kontrolu"],
+    routineBenefit: ["pokoj", "čas", "istotu", "kvalitu"],
+    errorView: ["dáta", "lekciu", "opravu", "smerovník"],
+    limitFactor: ["spánok", "kľud", "čas", "zmysel"],
+    impactArea: ["ľudí", "výsledok", "kvalitu", "budúcnosť"],
+  };
+
+  const fallback = ["niečo konkrétne", "realitu", "poriadok", "pokoj", "zmysel"];
+  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_m, key: string) => {
+    const arr = pools[key] || fallback;
+    return pick(arr, `${seed}|tok|${key}`);
+  });
+}
+
+// ----- Edition pack types (minimal) -----
+type EditionConfig = {
+  paywall?: { teaserPerCategory?: number };
+  pricing?: { amountCents?: number; currency?: string; stripePriceId?: string };
+};
+
+type PackItem = { id: string; title: string; template: string };
+type PackCategory = { id: string; title: string; intro: string; lockedIntro: string; items: PackItem[] };
+type ContentPack = {
+  uiCopy?: {
+    heroTitle?: string;
+    heroSubtitle?: string;
+    unlockCta?: string;
+  };
+  categories?: PackCategory[];
+};
+
+type PackBlock = {
+  section: string;
+  heading: string;
+  intro?: string;
+  lockedIntro?: string;
+  rows: { id: string; title: string; value: string; canShow: boolean }[];
+};
 
 const LS_LAST = "coso:lastInput:v1";
 const LS_PAID_RID = "coso:paidRid:v1";
@@ -161,6 +241,12 @@ export default function Home() {
   const [isPaid, setIsPaid] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [shareMsg, setShareMsg] = useState<string | null>(null);
+
+  // Edition content (from coso-sites)
+  const [editionSlug] = useState("nevedel");
+  const [editionConfig, setEditionConfig] = useState<EditionConfig | null>(null);
+  const [pack, setPack] = useState<ContentPack | null>(null);
+  const [packError, setPackError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -178,6 +264,23 @@ export default function Home() {
       localStorage.setItem(LS_LAST, JSON.stringify({ name, birthISO, submitted }));
     } catch {}
   }, [name, birthISO, submitted]);
+
+  // Load edition pack/config
+  useEffect(() => {
+    fetch(`/api/edition/${encodeURIComponent(editionSlug)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d?.ok) throw new Error(d?.error || "Edition load failed");
+        setEditionConfig(d?.config || null);
+        setPack(d?.pack || null);
+        setPackError(null);
+      })
+      .catch((e) => {
+        setPackError(e?.message || "Edition load failed");
+        setEditionConfig(null);
+        setPack(null);
+      });
+  }, [editionSlug]);
 
   const computed = useMemo(() => {
     if (!submitted) return null;
@@ -201,18 +304,38 @@ export default function Home() {
     const aliveTxt = aliveLine(alive, `${key}|alive|${cleanName}`);
     const czTxt = chineseZodiacLine(cz, birth.getFullYear(), `${key}|cz|${cleanName}`);
 
-    // Core sekcie vždy, extra sekcie až keď isPaid=true
-    const factBlocks = buildFactBlocks({
-      name: cleanName,
-      dobISO: birthISO,
-      rid: resultId,
-      daysAlive: alive,
-      isPaid,
-      rowsCore: { min: 5, max: 7 },
-      rowsExtra: { min: 4, max: 6 },
-    });
-
     const postPaidFooter = pick(paywallCopy.postPaidFooterPool, `${resultId}|postpaidfooter`);
+
+    const teaserPerCategory = Number(editionConfig?.paywall?.teaserPerCategory ?? 3) || 3;
+
+    let blocks: PackBlock[] | null = null;
+
+    if (pack?.categories?.length) {
+      blocks = pack.categories.map((c) => ({
+        section: c.id,
+        heading: c.title,
+        intro: c.intro,
+        lockedIntro: c.lockedIntro,
+        rows: (c.items || []).map((it, idx) => {
+          const canShow = isPaid || idx < teaserPerCategory;
+          const value = canShow ? fillTemplate(it.template, `${resultId}|${c.id}|${it.id}`) : "— — —";
+          return { id: it.id, title: it.title, value, canShow };
+        }),
+      }));
+    }
+
+    const factBlocksFallback =
+      !blocks
+        ? buildFactBlocks({
+            name: cleanName,
+            dobISO: birthISO,
+            rid: resultId,
+            daysAlive: alive,
+            isPaid,
+            rowsCore: { min: 5, max: 7 },
+            rowsExtra: { min: 4, max: 6 },
+          })
+        : null;
 
     return {
       cleanName,
@@ -227,10 +350,12 @@ export default function Home() {
       bday,
       aliveTxt,
       czTxt,
-      factBlocks,
       postPaidFooter,
+      teaserPerCategory,
+      blocks,
+      factBlocksFallback,
     };
-  }, [submitted, name, birthISO, isPaid]);
+  }, [submitted, name, birthISO, isPaid, pack, editionConfig]);
 
   const canSubmit = name.trim().length > 0 && !!parseISODate(birthISO);
 
@@ -261,10 +386,7 @@ export default function Home() {
       cz: computed.cz,
       age: computed.age,
       daysAlive: computed.alive,
-      factSummary: computed.factBlocks.map((b) => ({
-        section: b.section,
-        rows: b.rows.map((r) => ({ id: r.id, value: r.value })),
-      })),
+      mode: computed.blocks ? "pack" : "legacy",
     };
 
     postTelemetry(payload);
@@ -289,7 +411,9 @@ export default function Home() {
       .then((data) => {
         if (data?.paid) {
           const paidResultId = typeof data?.resultId === "string" ? data.resultId : computed.resultId;
-          try { localStorage.setItem(LS_PAID_RID, paidResultId); } catch {}
+          try {
+            localStorage.setItem(LS_PAID_RID, paidResultId);
+          } catch {}
           setIsPaid(paidResultId === computed.resultId);
           setPaywallOpen(false);
 
@@ -314,11 +438,20 @@ export default function Home() {
     if (data?.url) window.location.href = data.url;
   }
 
+  const heroTitle = pack?.uiCopy?.heroTitle || "Čo si o sebe určite nevedel";
+  const heroSubtitle = pack?.uiCopy?.heroSubtitle || "Toto nie je test. Je to zrkadlo.";
+
+  const priceCents = editionConfig?.pricing?.amountCents ?? 299;
+  const currency = (editionConfig?.pricing?.currency || "EUR").toUpperCase();
+  const priceStr = `${(priceCents / 100).toFixed(2)} ${currency}`;
+
   return (
     <main className="min-h-screen bg-neutral-950 text-neutral-100 flex items-center justify-center p-6">
       <div className="w-full max-w-2xl rounded-2xl bg-neutral-900 p-6 border border-neutral-800 shadow-xl">
-        <h1 className="text-2xl font-semibold">Čo si o sebe určite nevedel</h1>
-        <p className="text-neutral-300 mt-2 text-sm">Toto nie je test. Je to zrkadlo.</p>
+        <h1 className="text-2xl font-semibold">{heroTitle}</h1>
+        <p className="text-neutral-300 mt-2 text-sm">{heroSubtitle}</p>
+
+        {packError && <div className="mt-3 text-xs text-red-300">Edícia sa nenačítala: {packError}</div>}
 
         {!submitted && (
           <div className="mt-6 space-y-3">
@@ -382,55 +515,99 @@ export default function Home() {
             </section>
 
             <section className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
-              <h2 className="font-semibold">Ďalšie čísla sú len odhady. Zvláštne je, ako často sedia:</h2>
+              <h2 className="font-semibold">Ďalšie veci sú len odhady. Zvláštne je, ako často sedia:</h2>
 
-              <div className="mt-4 space-y-6">
-                {computed.factBlocks.map((block) => (
-                  <div key={block.section}>
-                    <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+              {/* PACK-DRIVEN MODE */}
+              {computed.blocks && (
+                <div className="mt-4 space-y-6">
+                  {computed.blocks.map((block) => (
+                    <div key={block.section}>
+                      <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+                      {block.intro && <div className="text-xs text-neutral-500 mb-3">{block.intro}</div>}
 
-                    <div className="space-y-2">
-                      {block.rows.map((row) => {
-                        const canShow = isPaid || revealChance(computed.resultId, block.section, row.id);
+                      <div className="space-y-2">
+                        {block.rows.map((row) => {
+                          const canShow = row.canShow;
+                          const valueText = row.value;
 
-                        const valueText = canShow ? row.value : "— — —";
-                        const noteText = row.note ? (canShow ? row.note : "Odomkne sa po pokračovaní.") : undefined;
-
-                        return (
-                          <div
-                            key={row.id}
-                            className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
-                          >
-                            <div className="text-neutral-300">{row.title}</div>
-
+                          return (
                             <div
-                              className={
-                                canShow
-                                  ? "text-neutral-100 font-semibold mt-1"
-                                  : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
-                              }
+                              key={row.id}
+                              className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
                             >
-                              {valueText}
-                            </div>
+                              <div className="text-neutral-300">{row.title}</div>
 
-                            {noteText && (
                               <div
                                 className={
                                   canShow
-                                    ? "text-neutral-400 mt-1"
-                                    : "text-neutral-400 mt-1 blur-[1.6px] select-none"
+                                    ? "text-neutral-100 font-semibold mt-1"
+                                    : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
                                 }
                               >
-                                {noteText}
+                                {valueText}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })}
+
+                              {!canShow && (
+                                <div className="text-neutral-400 mt-1 blur-[1.6px] select-none">
+                                  Odomkne sa po pokračovaní.
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
+
+              {/* LEGACY FALLBACK MODE */}
+              {!computed.blocks && computed.factBlocksFallback && (
+                <div className="mt-4 space-y-6">
+                  {computed.factBlocksFallback.map((block) => (
+                    <div key={block.section}>
+                      <div className="text-neutral-400 text-sm mb-2">{block.heading}</div>
+
+                      <div className="space-y-2">
+                        {block.rows.map((row) => {
+                          const canShow = isPaid;
+                          const valueText = canShow ? row.value : "— — —";
+                          const noteText = row.note ? (canShow ? row.note : "Odomkne sa po pokračovaní.") : undefined;
+
+                          return (
+                            <div
+                              key={row.id}
+                              className="rounded bg-neutral-950/50 border border-neutral-800 px-3 py-2 text-neutral-200 text-sm"
+                            >
+                              <div className="text-neutral-300">{row.title}</div>
+
+                              <div
+                                className={
+                                  canShow
+                                    ? "text-neutral-100 font-semibold mt-1"
+                                    : "text-neutral-100 font-semibold mt-1 blur-[1.8px] select-none"
+                                }
+                              >
+                                {valueText}
+                              </div>
+
+                              {noteText && (
+                                <div
+                                  className={
+                                    canShow ? "text-neutral-400 mt-1" : "text-neutral-400 mt-1 blur-[1.6px] select-none"
+                                  }
+                                >
+                                  {noteText}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {isPaid && (
                 <div className="mt-6 rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
@@ -459,7 +636,7 @@ export default function Home() {
                       onClick={async () => {
                         const url = `${window.location.origin}/?rid=${encodeURIComponent(computed.resultId)}`;
                         const r = await shareResult({
-                          title: "Čo si o sebe určite nevedel",
+                          title: heroTitle,
                           text: `${computed.cleanName}: teraz už vidíš celý obraz. Skús si to.`,
                           url,
                         });
@@ -499,7 +676,7 @@ export default function Home() {
                     className="w-full rounded-xl bg-neutral-100 text-neutral-950 py-2 font-semibold"
                     onClick={() => setPaywallOpen(true)}
                   >
-                    Pokračovať
+                    {pack?.uiCopy?.unlockCta || "Pokračovať"}
                   </button>
                   <div className="text-xs text-neutral-400 mt-2">
                     Odomkne sa všetko. A pribudnú aj vrstvy, ktoré sa bez toho ani neoplatí pozerať.
@@ -514,7 +691,16 @@ export default function Home() {
       {paywallOpen && computed && !("error" in computed) && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-6">
           <div className="w-full max-w-xl rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
-            <div className="text-xl font-semibold">{paywallCopy.title}</div>
+            <div className="flex items-start justify-between gap-4">
+              <div className="text-xl font-semibold">{paywallCopy.title}</div>
+              <button
+                className="text-neutral-400 hover:text-neutral-200"
+                onClick={() => setPaywallOpen(false)}
+                aria-label="Zavrieť"
+              >
+                ✕
+              </button>
+            </div>
 
             <div className="mt-3 text-sm text-neutral-200 space-y-1">
               {paywallCopy.intro.map((l, i) => (
@@ -542,6 +728,11 @@ export default function Home() {
               </div>
             </div>
 
+            <div className="mt-5 flex items-center justify-between text-sm">
+              <div className="text-neutral-400">Cena:</div>
+              <div className="text-neutral-100 font-semibold">{priceStr}</div>
+            </div>
+
             <div className="mt-5 text-sm text-neutral-200 font-semibold">{paywallCopy.howToContinue}</div>
 
             <button
@@ -550,18 +741,27 @@ export default function Home() {
             >
               {paywallCopy.fastPayBtn}
             </button>
-            <div className="text-xs text-neutral-400 mt-2">{paywallCopy.fastPayNote}</div>
 
-            <div className="mt-5 text-sm text-neutral-300">{paywallCopy.priceLine}</div>
-            <div className="mt-2 text-sm text-neutral-400 italic">{paywallCopy.closing}</div>
+            {/* SMS / alternative (len UI – logiku dopojíš neskôr) */}
+            <div className="mt-3 rounded-xl border border-neutral-800 bg-neutral-950/40 p-4">
+              <div className="text-sm font-semibold text-neutral-200">{paywallCopy.smsTitle || "SMS (alternatíva)"}</div>
+              <div className="mt-2 text-xs text-neutral-400">
+                {paywallCopy.smsText?.join(" ") ||
+                  "Ak chceš SMS flow, dopojíme ho ako samostatný provider. Teraz je tu len jasný placeholder, aby UI sedelo."}
+              </div>
+            </div>
 
             <div className="mt-5 flex gap-3">
               <button
-                className="w-full rounded-xl border border-neutral-800 py-2 text-neutral-200"
+                className="w-full rounded-xl border border-neutral-700 bg-transparent text-neutral-200 py-2 font-semibold"
                 onClick={() => setPaywallOpen(false)}
               >
-                Zavrieť
+                Zatvoriť
               </button>
+            </div>
+
+            <div className="mt-3 text-[11px] text-neutral-500">
+              Tip: po zaplatení sa ukladá odomknutie lokálne (rid). Neskôr to spravíme cez server-side token/certifikát.
             </div>
           </div>
         </div>
